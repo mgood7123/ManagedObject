@@ -216,7 +216,7 @@ TEST(references, 10) {
 
 ```
 
-below is their implementation
+# Boxed implementation
 
 ```cpp
 template <typename T>
