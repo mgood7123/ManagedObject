@@ -16,6 +16,8 @@ struct ManagedObjectHeap {
         mutable std::shared_ptr<ManagedObjectHeap> heap;
     };
 
+    static std::shared_ptr<ManagedObjectHeap> & get_root();
+
     struct Info {
         size_t index = 0;
         void * ptr = nullptr;
@@ -46,6 +48,7 @@ struct ManagedObjectHeap {
         bool seen  = false;
         uint8_t color = MANAGED_OBJECT_HEAP_COLOR_WHITE;
         bool sweep = false;
+        uint8_t dealloc_count = 0;
     };
 
     const char * tag;
@@ -60,6 +63,10 @@ struct ManagedObjectHeap {
     virtual ~ManagedObjectHeap();
 
     void dealloc(std::shared_ptr<ManagedObjectHeap> & root);
+    
+    void collect();
+    
+    void collect(std::shared_ptr<ManagedObjectHeap> & root);
 
     void print();
 

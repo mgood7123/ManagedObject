@@ -5,6 +5,14 @@
 #endif
 #include <cstdio>
 
+#include <mutex>
+
+// std::recursive_mutex gc_lock;
+
+// collect every 20 deallocations
+//
+uint8_t dealloc_limit = 20;
+
 #define MANAGED_OBJECT_HEAP_COLOR_TO_STRING(color) color == MANAGED_OBJECT_HEAP_COLOR_WHITE ? "WHITE" : color == MANAGED_OBJECT_HEAP_COLOR_GRAY ? "GRAY" : "BLACK"
 
 const std::shared_ptr<ManagedObjectHeap> & empty_heap() {
@@ -73,15 +81,64 @@ ManagedObjectHeap::~ManagedObjectHeap() {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     printf("DESTROY MANAGED_HEAP\n");
 #endif
+    dealloc(get_root());
+}
+
+std::shared_ptr<ManagedObjectHeap> & ManagedObjectHeap::get_root() {
+    static std::shared_ptr<ManagedObjectHeap> root = ManagedObjectHeap::make("root list");
+    return root;
 }
 
 void ManagedObjectHeap::dealloc(std::shared_ptr<ManagedObjectHeap> & root) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!root->memory->seen);
+    if (root->memory->seen) {
+        return;
+    }
     printf("DEALLOC MANAGED_HEAP\n");
 #endif
     deallocated = true;
+    if (root.get() == this) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
+        printf("COLLECT ROOT\n");
+#endif
+        collect(root);
+        root->memory->dealloc_count = 0;
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+        printf("COLLECTED ROOT\n");
+#endif
+    } else {
+        root->memory->dealloc_count++;
+        if (dealloc_limit != 0) {
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+            printf("DEALLOC COUNT: %d\n", root->memory->dealloc_count);
+            printf("DEALLOC LIMIT: %d\n", dealloc_limit);
+#endif
+            if (root->memory->dealloc_count == dealloc_limit) {
+                collect(root);
+                root->memory->dealloc_count = 0;
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+                printf("DEALLOC COUNT: %d\n", root->memory->dealloc_count);
+#endif
+            }
+
+            if (root->memory->dealloc_count > dealloc_limit) {
+                collect(root);
+            }
+        }
+    }
+}
+
+void ManagedObjectHeap::collect() {
+    collect(get_root());
+}
+
+void ManagedObjectHeap::collect(std::shared_ptr<ManagedObjectHeap> & root) {
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    if (root->memory->dealloc_count > dealloc_limit) {
+        printf("COLLECT INNER\n");
+    } else {
+        printf("COLLECT\n");
+    }
     printf("indexes: %zu\n", memory->indexes.size());
     printf("memories: %zu\n", memory->memory.size());
     assert(memory->indexes.size() == memory->memory.size());
@@ -107,6 +164,13 @@ void ManagedObjectHeap::dealloc(std::shared_ptr<ManagedObjectHeap> & root) {
     root->do_sweep();
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     assert(!root->memory->seen);
+#endif
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    if (root->memory->dealloc_count > dealloc_limit) {
+        printf("COLLECTED INNER\n");
+    } else {
+        printf("COLLECTED\n");
+    }
 #endif
 }
 
@@ -266,7 +330,6 @@ void ManagedObjectHeap::mark_prune() {
         sweep = true;
     }
     if (memory->seen) {
-        memory->sweep = false;
         return;
     }
     memory->seen = true;
@@ -370,6 +433,10 @@ void ManagedObjectHeap::do_prune(std::vector<std::pair<void*, std::function<void
         if (!info.is_ptr || info.ptr_is_ref) {
             auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
             if (ref.get() != nullptr) {
+                if (ref->memory->seen) {
+                    // skip this reference, we are already processing it somewhere else so we dont want to touch it
+                    continue;
+                }
                 ref->do_prune(list);
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
                 assert(indexes.size() == mem.size());

@@ -1,11 +1,7 @@
 #include <managed_object.h>
 
 std::shared_ptr<ManagedObjectHeap> & ManagedObject::get_root() {
-    static std::shared_ptr<ManagedObjectHeap> root = ManagedObjectHeap::make("root list");
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!root->memory->seen);
-#endif
-    return root;
+    return ManagedObjectHeap::get_root();
 }
 
 ManagedObject::ManagedObject() : ManagedObject("no name") {}

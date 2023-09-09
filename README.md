@@ -1,6 +1,6 @@
 # ManagedObject
 
-a minimal Managed Object implementation for C++
+a minimal Managed Object (Managed = GC tracked, Unmanaged = malloc/free/new/delete/ect) implementation for C++
 
 based on the `'object reference' system` that is used by Java, C# and other high-level language
 
@@ -16,6 +16,8 @@ clear ; make CC=clang CXX=clang++ test_debug_valgrind
 `ManagedObject` allows one to easily implement managed garbage collected resources in C++
 
 garbage collection is implemented via `reference reachability` (which automatically handles `cyclic references`), and merged with a `mini-heap` to store the `structural data` required by the garbage collector
+
+the garbage collector `is not multi-threaded`
 
 `it should be impossible to leak a reference that cannot be cleaned up by the garbage collector under normal conditions except for incorrect api usage`
 
