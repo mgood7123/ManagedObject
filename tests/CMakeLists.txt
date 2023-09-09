@@ -1,0 +1,14 @@
+cmake_minimum_required(VERSION 3.4.1)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+testBuilder_add_source(managed_object_tests_debug managed_object_tests.cpp)
+testBuilder_add_library(managed_object_tests_debug gtest_main)
+testBuilder_add_library(managed_object_tests_debug managed_object_debug)
+testBuilder_build(managed_object_tests_debug EXECUTABLES)
+
+testBuilder_add_source(managed_object_tests_no_debug managed_object_tests.cpp)
+testBuilder_add_library(managed_object_tests_no_debug gtest_main)
+testBuilder_add_library(managed_object_tests_no_debug managed_object)
+testBuilder_build(managed_object_tests_no_debug EXECUTABLES)
