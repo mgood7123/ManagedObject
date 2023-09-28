@@ -11,21 +11,20 @@
 #define MANAGED_OBJECT_HEAP_COLOR_GRAY 1
 #define MANAGED_OBJECT_HEAP_COLOR_BLACK 2
 
+#define MANAGED_OBJECT_GET_HEAP(info) (info.ptr_is_ref ? (info.ptr == nullptr ? nullptr : static_cast<ManagedObjectHeap*>(info.ptr)) : nullptr)
+
 struct ManagedObjectHeap {
     struct HeapHolder {
-        mutable std::shared_ptr<ManagedObjectHeap> heap;
+        mutable ManagedObjectHeap * heap = nullptr;
     };
 
-    static std::shared_ptr<ManagedObjectHeap> & get_root();
+    static ManagedObjectHeap * get_root();
 
     struct Info {
         size_t index = 0;
         void * ptr = nullptr;
-        std::function<void(void*)> destructor;
-        bool is_ptr = false;
+        void (*destructor)(void*);
         bool ptr_is_ref = false;
-
-        std::shared_ptr<ManagedObjectHeap> ref;
 
         Info();
 
@@ -37,7 +36,7 @@ struct ManagedObjectHeap {
 
         Info & operator = (ManagedObjectHeap copy);
 
-        Info & operator = (std::shared_ptr<ManagedObjectHeap> & ref);
+        Info & operator = (ManagedObjectHeap * ref);
 
         virtual ~Info();
     };
@@ -45,16 +44,16 @@ struct ManagedObjectHeap {
     struct Memory {
         std::vector<size_t> indexes;
         std::vector<Info> memory;
-        bool seen  = false;
-        uint8_t color = MANAGED_OBJECT_HEAP_COLOR_WHITE;
-        bool sweep = false;
+        uint8_t color = MANAGED_OBJECT_HEAP_COLOR_GRAY;
         uint8_t dealloc_count = 0;
+        bool seen  = false;
+        bool keep_memory = false;
     };
 
-    const char * tag;
-    std::shared_ptr<Memory> memory = std::make_shared<Memory>();
-    bool sweep = false;
+    const char * tag = "no name";
+    Memory * memory = nullptr;
     bool deallocated = false;
+    Memory * (ManagedObjectHeap::*get_memory_)();
 
     ManagedObjectHeap();
 
@@ -62,84 +61,81 @@ struct ManagedObjectHeap {
 
     virtual ~ManagedObjectHeap();
 
-    void dealloc(std::shared_ptr<ManagedObjectHeap> & root);
+    void dealloc(ManagedObjectHeap * root);
     
-    void collect();
+    size_t collect();
     
-    void collect(std::shared_ptr<ManagedObjectHeap> & root);
+    size_t collect(ManagedObjectHeap * root);
 
     void print();
 
     void print(std::function<void()> prefix);
 
-    void clear_marks();
-
     void mark();
 
-    void do_sweep();
+    size_t sweep_();
 
-    void mark_prune();
-
-    void prune();
-
-    void prune(std::function<void()> prefix);
-
-    void do_prune(std::vector<std::pair<void*, std::function<void(void*)>>> & list);
+    void do_sweep(std::vector<std::pair<void*, void (*)(void*)>> & list, std::vector<std::pair<void*, void (*)(void*)>> & memory_list);
 
     void color();
 
     void color(std::function<void()> prefix);
 
+    
+    Memory * get_memory();
+    Memory * get_memory1();
+    Memory * get_memory2();
+
     template <typename T>
     size_t push(T & value) {
-        size_t index = memory->memory.size();
-        memory->indexes.push_back(index);
-        memory->memory.emplace_back(index);
-        auto & info = memory->memory.back();
+        Memory * m = get_memory();
+        size_t index = m->memory.size();
+        m->indexes.push_back(index);
+        m->memory.emplace_back(index);
+        auto & info = m->memory.back();
         info = value;
-        info.destructor = [](void*p){};
+        info.destructor = +[](void*){};
         return index;
     }
 
-    template <typename T>
-    size_t push(std::shared_ptr<T> & value) {
-        size_t index = memory->memory.size();
-        memory->indexes.push_back(index);
-        memory->memory.emplace_back(index);
-        auto & info = memory->memory.back();
-        info = value;
-        info.destructor = [](void*p){};
-        return index;
-    }
+    // template <typename T>
+    // size_t push(std::shared_ptr<T> & value) {
+    //     Memory * m = get_memory();
+    //     size_t index = m->memory.size();
+    //     m->indexes.push_back(index);
+    //     m->memory.emplace_back(index);
+    //     auto & info = m->memory.back();
+    //     info = value;
+    //     return index;
+    // }
 
     template <typename T>
-    size_t push(T * & value, std::function<void(void*)> destructor) {
-        size_t index = memory->memory.size();
-        memory->indexes.push_back(index);
-        memory->memory.emplace_back(index);
-        auto & info = memory->memory.back();
+    size_t push(T * value, void (*destructor)(void*)) {
+        Memory * m = get_memory();
+        size_t index = m->memory.size();
+        m->indexes.push_back(index);
+        m->memory.emplace_back(index);
+        auto & info = m->memory.back();
         info = value;
         info.destructor = destructor;
         return index;
     }
 
     template <typename T>
-    size_t push(T * & value, bool is_ref, std::function<void(void*)> destructor) {
-        size_t index = memory->memory.size();
-        memory->indexes.push_back(index);
-        memory->memory.emplace_back(index);
-        auto & info = memory->memory.back();
+    size_t push(T * value, bool is_ref, void (*destructor)(void*)) {
+        Memory * m = get_memory();
+        size_t index = m->memory.size();
+        m->indexes.push_back(index);
+        m->memory.emplace_back(index);
+        auto & info = m->memory.back();
         info = value;
         info.destructor = destructor;
-        info.ptr_is_ref = true;
         return index;
     }
+
+    size_t push(ManagedObjectHeap * value);
 
     size_t push();
-
-    static std::shared_ptr<ManagedObjectHeap> make();
-    static std::shared_ptr<ManagedObjectHeap> make(const char * tag);
-
 };
 
 #endif

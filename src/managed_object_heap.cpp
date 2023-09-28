@@ -11,14 +11,9 @@
 
 // collect every 20 deallocations
 //
-uint8_t dealloc_limit = 20;
+uint8_t dealloc_limit = 10;
 
 #define MANAGED_OBJECT_HEAP_COLOR_TO_STRING(color) color == MANAGED_OBJECT_HEAP_COLOR_WHITE ? "WHITE" : color == MANAGED_OBJECT_HEAP_COLOR_GRAY ? "GRAY" : "BLACK"
-
-const std::shared_ptr<ManagedObjectHeap> & empty_heap() {
-    static const std::shared_ptr<ManagedObjectHeap> m;
-    return m;
-}
 
 ManagedObjectHeap::Info::Info() {}
 
@@ -28,9 +23,7 @@ ManagedObjectHeap::Info & ManagedObjectHeap::Info::operator = (void * ptr) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     printf("SETTING A 'VOID *' POINTER OBJECT %p\n", ptr);
 #endif
-    ref.reset();
     this->ptr = ptr;
-    is_ptr = true;
     return *this;
 }
 
@@ -38,9 +31,7 @@ ManagedObjectHeap::Info & ManagedObjectHeap::Info::operator = (uintptr_t ptr) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     printf("SETTING A 'UINTPTR_T' POINTER OBJECT\n");
 #endif
-    ref.reset();
     this->ptr = (void*)ptr;
-    is_ptr = true;
     return *this;
 }
 
@@ -48,19 +39,31 @@ ManagedObjectHeap::Info & ManagedObjectHeap::Info::operator = (ManagedObjectHeap
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     printf("SETTING A 'MANAGED_HEAP' COPY OBJECT\n");
 #endif
-    ref.reset();
-    is_ptr = false;
-    ref = std::make_shared<ManagedObjectHeap>(copy);
+    ManagedObjectHeap * s = new ManagedObjectHeap();
+    *s = copy;
+    this->ptr = s;
+    ptr_is_ref = true;
+    destructor = std::move(+[](void*p){
+        #ifdef MANAGED_OBJECT_HEAP_DEBUG
+            printf("DELETE MANAGED_HEAP '%s'\n", static_cast<ManagedObjectHeap*>(p)->tag);
+        #endif
+        delete static_cast<ManagedObjectHeap*>(p);
+    });
     return *this;
 }
 
-ManagedObjectHeap::Info & ManagedObjectHeap::Info::operator = (std::shared_ptr<ManagedObjectHeap> & ref) {
+ManagedObjectHeap::Info & ManagedObjectHeap::Info::operator = (ManagedObjectHeap * ref) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     printf("SETTING A 'MANAGED_HEAP' REFERENCE OBJECT\n");
 #endif
-    this->ref.reset();
-    is_ptr = false;
-    this->ref = ref;
+    this->ptr = ref;
+    ptr_is_ref = true;
+    destructor = std::move(+[](void*p){
+        #ifdef MANAGED_OBJECT_HEAP_DEBUG
+            printf("DELETE MANAGED_HEAP '%s'\n", static_cast<ManagedObjectHeap*>(p)->tag);
+        #endif
+        delete static_cast<ManagedObjectHeap*>(p);
+    });
     return *this;
 }
 
@@ -70,380 +73,289 @@ ManagedObjectHeap::Info::~Info() {
 #endif
 }
 
+ManagedObjectHeap::Memory * ManagedObjectHeap::get_memory() {
+    return (this->*get_memory_)();
+}
 
-ManagedObjectHeap::ManagedObjectHeap() {}
+ManagedObjectHeap::Memory * ManagedObjectHeap::get_memory1() {
+    memory = new Memory();
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    printf("CREATED MEMORY %p\n", memory);
+#endif
+    get_memory_ = &ManagedObjectHeap::get_memory2;
+    return memory;
+}
+
+ManagedObjectHeap::Memory * ManagedObjectHeap::get_memory2() {
+    return memory;
+}
+
+ManagedObjectHeap::ManagedObjectHeap() {
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    printf("CREATE MANAGED_HEAP '%s'\n", tag);
+#endif
+    get_memory_ = &ManagedObjectHeap::get_memory1;
+}
 
 ManagedObjectHeap::ManagedObjectHeap(const char * tag) {
     this->tag = tag;
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    printf("CREATE MANAGED_HEAP '%s'\n", tag);
+#endif
+    get_memory_ = &ManagedObjectHeap::get_memory1;
 }
 
 ManagedObjectHeap::~ManagedObjectHeap() {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    printf("DESTROY MANAGED_HEAP\n");
+    printf("DESTROY MANAGED_HEAP '%s'\n", tag);
 #endif
     dealloc(get_root());
 }
 
-std::shared_ptr<ManagedObjectHeap> & ManagedObjectHeap::get_root() {
-    static std::shared_ptr<ManagedObjectHeap> root = ManagedObjectHeap::make("root list");
-    return root;
+ManagedObjectHeap * ManagedObjectHeap::get_root() {
+    static ManagedObjectHeap root = ManagedObjectHeap("root list");
+    return & root;
 }
 
-void ManagedObjectHeap::dealloc(std::shared_ptr<ManagedObjectHeap> & root) {
+bool inside_destructor = false;
+size_t collect_count = 0;
+
+void ManagedObjectHeap::dealloc(ManagedObjectHeap * root) {
+    if (inside_destructor) return;
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    if (root->memory->seen) {
+    if (root->get_memory()->seen) {
         return;
     }
-    printf("DEALLOC MANAGED_HEAP\n");
+    printf("DEALLOC MANAGED_HEAP '%s'\n", tag);
 #endif
     deallocated = true;
-    if (root.get() == this) {
+    if (root == this) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
         printf("COLLECT ROOT\n");
 #endif
         collect(root);
-        root->memory->dealloc_count = 0;
+
+        // get_root()->dealloc() has been called, delete memory
+        //
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+        printf("DELETE MEMORY %p\n", memory);
+#endif
+        delete memory;
+
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
         printf("COLLECTED ROOT\n");
 #endif
+        return;
     } else {
-        root->memory->dealloc_count++;
-        if (dealloc_limit != 0) {
+        root->get_memory()->dealloc_count++;
+        if (inside_destructor || (dealloc_limit != 0 && root->get_memory()->dealloc_count >= dealloc_limit)) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-            printf("DEALLOC COUNT: %d\n", root->memory->dealloc_count);
+            printf("DEALLOC COUNT: %d\n", root->get_memory()->dealloc_count);
             printf("DEALLOC LIMIT: %d\n", dealloc_limit);
+            printf("COLLECT COUNT: %zu\n", collect_count);
 #endif
-            if (root->memory->dealloc_count == dealloc_limit) {
+            if (inside_destructor) {
                 collect(root);
-                root->memory->dealloc_count = 0;
+            } else {
+                collect(root);
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-                printf("DEALLOC COUNT: %d\n", root->memory->dealloc_count);
+                printf("DEALLOC COUNT: %d\n", root->get_memory()->dealloc_count);
 #endif
-            }
-
-            if (root->memory->dealloc_count > dealloc_limit) {
-                collect(root);
             }
         }
     }
 }
 
-void ManagedObjectHeap::collect() {
-    collect(get_root());
+size_t ManagedObjectHeap::collect() {
+    return collect(get_root());
 }
 
-void ManagedObjectHeap::collect(std::shared_ptr<ManagedObjectHeap> & root) {
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-    if (root->memory->dealloc_count > dealloc_limit) {
+#include <chrono>
+
+size_t ManagedObjectHeap::collect(ManagedObjectHeap * root) {
+    if (root->get_memory()->memory.size() == 0) {
+        return 0;
+    }
+    auto start = std::chrono::high_resolution_clock::now();
+    if (inside_destructor) {
         printf("COLLECT INNER\n");
     } else {
         printf("COLLECT\n");
     }
-    printf("indexes: %zu\n", memory->indexes.size());
-    printf("memories: %zu\n", memory->memory.size());
-    assert(memory->indexes.size() == memory->memory.size());
-    printf("root indexes: %zu\n", root->memory->indexes.size());
-    printf("root memories: %zu\n", root->memory->memory.size());
-    assert(!root->memory->seen);
-    root->print();
-    assert(!root->memory->seen);
-    printf("ERASING MARKS\n");
-#endif
-    root->clear_marks();
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!root->memory->seen);
+    printf("indexes: %zu\n", get_memory()->indexes.size());
+    printf("memories: %zu\n", get_memory()->memory.size());
+    assert(get_memory()->indexes.size() == get_memory()->memory.size());
+    printf("root indexes: %zu\n", root->get_memory()->indexes.size());
+    printf("root memories: %zu\n", root->get_memory()->memory.size());
+    assert(!root->get_memory()->seen);
+    root->print();
+    assert(!root->get_memory()->seen);
+#endif
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
     printf("MARKING\n");
 #endif
     root->mark();
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!root->memory->seen);
+    assert(!root->get_memory()->seen);
     printf("PRINTING MARKS\n");
     root->color();
-    assert(!root->memory->seen);
+    assert(!root->get_memory()->seen);
 #endif
-    root->do_sweep();
+    size_t s = root->sweep_();
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!root->memory->seen);
+    assert(!root->get_memory()->seen);
 #endif
+    auto end = std::chrono::high_resolution_clock::now();
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    if (root->memory->dealloc_count > dealloc_limit) {
-        printf("COLLECTED INNER\n");
+#endif
+    if (inside_destructor) {
+        printf("COLLECTED (INNER) %zu objects in %f ms\n", s, std::chrono::duration<double, std::milli>(end - start).count());
     } else {
-        printf("COLLECTED\n");
+        printf("COLLECTED %zu objects (%zu total objects) in %f ms\n", s, collect_count, std::chrono::duration<double, std::milli>(end - start).count());
     }
+    if (!inside_destructor) {
+        root->get_memory()->dealloc_count = 0;
+        collect_count = 0;
+    }
+    return s;
+}
+
+template <typename T>
+void do_destroy(T & pair) {
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    printf("RUNNING DESTRUCTOR - PRUNE PTR: %p\n", pair.first);
+#endif
+    pair.second(pair.first);
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    printf("RAN DESTRUCTOR\n");
 #endif
 }
 
-void ManagedObjectHeap::print() {
+template <typename T>
+void do_memory_destroy(T & pair) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
+    printf("RUNNING MEMORY DESTRUCTOR - PRUNE PTR: %p\n", pair.first);
 #endif
-    print([](){});
+    pair.second(pair.first);
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
+    printf("RAN MEMORY DESTRUCTOR\n");
 #endif
 }
 
-void ManagedObjectHeap::print(std::function<void()> prefix) {
-    size_t m = memory->memory.size();
-    if (m == 0) {
-        prefix();
-        printf("[%p, %s ", this, tag);
-        if (deallocated) {
-            printf("[deallocated] ");
-        }
-        printf("[ZERO SIZE] ]\n");
-        return;
-    }
-    if (memory->seen) {
-        prefix();
-        printf("[%p, %s ", this, tag);
-        if (deallocated) {
-            printf("[deallocated] ");
-        }
-        printf("[CYCLIC DETECTED] ]\n");
-        return;
-    }
-    if (deallocated) {
-        prefix();
-        printf("[%p, %s [deallocated] ]\n", this, tag);
-        return;
-    }
-    memory->seen = true;
-    for (int i = 0; i < m; i++) {
-        auto & info = memory->memory[i];
-        if (info.is_ptr && !info.ptr_is_ref) {
-            prefix();
-            printf("[%p, %s] memory[%d] = %p\n", this, tag, i, info.ptr);
+size_t ManagedObjectHeap::sweep_() {
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    printf("SWEEPING\n");
+    assert(!get_memory()->seen);
+#endif
+    size_t s = 0;
+    {
+        std::vector<std::pair<void*, void (*)(void*)>> list;
+        std::vector<std::pair<void*, void (*)(void*)>> memory_list;
+
+        do_sweep(list, memory_list);
+
+        s = list.size() + memory_list.size();
+        collect_count += s;
+
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+        printf("RUNNING %zu DESTRUCTORS...\n", s);
+#endif
+
+        if (inside_destructor) {
+            for (auto itr = list.rbegin(); itr != list.rend(); itr++) {
+                do_destroy(*itr);
+            }
+            for (auto itr = memory_list.rbegin(); itr != memory_list.rend(); itr++) {
+                do_memory_destroy(*itr);
+            }
         } else {
-            auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
-            if (ref.get() != nullptr) {
-                ref->print([&, this](){
-                    prefix();
-                    if (info.ptr_is_ref) {
-                        printf("[%p, %s] memory[%d] = (ref %p) ", this, tag, i, info.ptr);
-                    } else {
-                        printf("[%p, %s] memory[%d] = ", this, tag, i);
-                    }
-                });
-            } else {
-                prefix();
-                printf("[%p, %s] memory[%d] = %p\n", this, tag, i, nullptr);
+            inside_destructor = true;
+            for (auto itr = list.rbegin(); itr != list.rend(); itr++) {
+                do_destroy(*itr);
             }
+            for (auto itr = memory_list.rbegin(); itr != memory_list.rend(); itr++) {
+                do_memory_destroy(*itr);
+            }
+            inside_destructor = false;
         }
     }
-    memory->seen = false;
-}
-
-void ManagedObjectHeap::clear_marks() {
-    if (memory->seen) {
-        return;
-    }
-    memory->color = MANAGED_OBJECT_HEAP_COLOR_WHITE;
-    memory->sweep = false;
-    memory->seen = true;
-    size_t m = memory->memory.size();
-    for (size_t i = 0; i < m; i++) {
-        auto & info = memory->memory[i];
-        if (!info.is_ptr || info.ptr_is_ref) {
-            auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
-            if (ref.get() != nullptr) {
-                ref->clear_marks();
-            }
-        }
-    }
-    memory->seen = false;
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    printf("RAN %zu DESTRUCTORS\n", s);
+#endif
+    return s;
 }
 
 void ManagedObjectHeap::mark() {
-    size_t m = memory->memory.size();
-    if (m == 0 || memory->seen || memory->color == MANAGED_OBJECT_HEAP_COLOR_BLACK) {
+    get_memory()->keep_memory = false;
+    if (get_memory()->color != MANAGED_OBJECT_HEAP_COLOR_GRAY) {
         return;
-    }
-    if (deallocated) {
-        memory->color = MANAGED_OBJECT_HEAP_COLOR_WHITE;
+    } else if (deallocated) {
+        get_memory()->color = MANAGED_OBJECT_HEAP_COLOR_WHITE;
     } else {
-        memory->color = MANAGED_OBJECT_HEAP_COLOR_GRAY;
-        memory->seen = true;
-        for (size_t i = 0; i < m; i++) {
-            auto & info = memory->memory[i];
-            if (!info.is_ptr || info.ptr_is_ref) {
-                auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
-                if (ref.get() != nullptr) {
-                    ref->mark();
-                }
-            }
-        }
-        memory->seen = false;
-        memory->color = MANAGED_OBJECT_HEAP_COLOR_BLACK;
+        get_memory()->color = MANAGED_OBJECT_HEAP_COLOR_BLACK;
     }
-}
-
-void ManagedObjectHeap::do_sweep() {
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-    printf("SWEEPING\n");
-    assert(!memory->seen);
-#endif
-    mark_prune();
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
-    prune();
-    assert(!memory->seen);
-    printf("PRUNING\n");
-    assert(!memory->seen);
-#endif
-    {
-        std::vector<std::pair<void*, std::function<void(void*)>>> list;
-
-        do_prune(list);
-
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-        printf("RUNNING %zu DESTRUCTORS...\n", list.size());
-#endif
-
-        for(auto & p : list) {
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-            printf("RUNNING DESTRUCTOR - PRUNE PTR: %p\n", p.first);
-#endif
-            p.second(p.first);
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-            printf("RAN DESTRUCTOR\n");
-#endif
-        }
-
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-        printf("RAN %zu DESTRUCTORS\n", list.size());
-#endif
-    }
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
-    prune();
-    assert(!memory->seen);
-#endif
-}
-
-void ManagedObjectHeap::mark_prune() {
-    if (memory->color == MANAGED_OBJECT_HEAP_COLOR_WHITE) {
-        memory->sweep = true;
-    }
-    if (memory->color == MANAGED_OBJECT_HEAP_COLOR_BLACK && deallocated) {
-        sweep = true;
-    }
-    if (memory->seen) {
-        return;
-    }
-    memory->seen = true;
-    size_t m = memory->memory.size();
+    size_t m = get_memory()->memory.size();
     for (size_t i = 0; i < m; i++) {
-        auto & info = memory->memory[i];
-        if (!info.is_ptr || info.ptr_is_ref) {
-            auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
-            if (ref.get() != nullptr) {
-                ref->mark_prune();
+        auto & info = get_memory()->memory[i];
+        if (info.ptr_is_ref) {
+            ManagedObjectHeap * ref = MANAGED_OBJECT_GET_HEAP(info);
+            if (ref != nullptr) {
+                ref->mark();
             }
         }
     }
-    memory->seen = false;
 }
 
-void ManagedObjectHeap::prune() {
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
-#endif
-    prune([](){});
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
-#endif
-}
-
-void ManagedObjectHeap::prune(std::function<void()> prefix) {
-    size_t m = memory->memory.size();
-    if (m == 0) {
-        prefix();
-        printf("[%p, %s [%s] ", this, tag, sweep ? "SWEEP OBJECT ONLY" : memory->sweep ? "SWEEP OBJECT AND MEMORY" : "KEEP");
-        if (deallocated) {
-            printf("[deallocated] ");
-        }
-        printf("[ZERO SIZE] ]\n");
+void ManagedObjectHeap::do_sweep(std::vector<std::pair<void*, void (*)(void*)>> & list, std::vector<std::pair<void*, void (*)(void*)>> & memory_list) {
+    if (get_memory()->seen) {
         return;
     }
-    if (memory->seen) {
-        prefix();
-        printf("[%p, %s [%s] ", this, tag, sweep ? "SWEEP OBJECT ONLY" : memory->sweep ? "SWEEP OBJECT AND MEMORY" : "KEEP");
-        if (deallocated) {
-            printf("[deallocated] ");
-        }
-        printf("[CYCLIC DETECTED] ]\n");
-        return;
+    get_memory()->seen = true;
+    auto & mem = get_memory()->memory;
+    auto & indexes = get_memory()->indexes;
+    if (get_memory()->color == MANAGED_OBJECT_HEAP_COLOR_BLACK) {
+        get_memory()->color = MANAGED_OBJECT_HEAP_COLOR_GRAY;
     }
-    if (deallocated) {
-        prefix();
-        printf("[%p, %s [%s] [deallocated] ]\n", this, tag, sweep ? "SWEEP OBJECT ONLY" : memory->sweep ? "SWEEP OBJECT AND MEMORY" : "KEEP");
-    }
-    memory->seen = true;
-    for (int i = 0; i < m; i++) {
-        auto & info = memory->memory[i];
-        if (info.is_ptr && !info.ptr_is_ref) {
-            prefix();
-            printf("[%p, %s [%s] ", this, tag, sweep ? "SWEEP OBJECT ONLY" : memory->sweep ? "SWEEP OBJECT AND MEMORY" : "KEEP");
-            if (deallocated) {
-                printf("[deallocated] ");
-            }
-            printf("] memory[%d] = %p\n", i, info.ptr);
-        } else {
-            auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
-            if (ref.get() != nullptr) {
-                ref->prune([&, this]() {
-                    prefix();
-                    printf("[%p, %s [%s] ", this, tag, sweep ? "SWEEP OBJECT ONLY" : memory->sweep ? "SWEEP OBJECT AND MEMORY" : "KEEP");
-                    if (deallocated) {
-                        printf("[deallocated] ");
-                    }
-                    if (info.ptr_is_ref) {
-                        printf("] memory[%d] = (ref %p) ", i, info.ptr);
-                    } else {
-                        printf("] memory[%d] = ", i);
-                    }
-                });
-            } else {
-                prefix();
-                printf("[%p, %s [%s] ", this, tag, sweep ? "SWEEP OBJECT ONLY" : memory->sweep ? "SWEEP OBJECT AND MEMORY" : "KEEP");
-                if (deallocated) {
-                    printf("[deallocated] ");
-                }
-                printf("] memory[%d] = %p\n", i, nullptr);
-            }
-        }
-    }
-    memory->seen = false;
-}
-
-void ManagedObjectHeap::do_prune(std::vector<std::pair<void*, std::function<void(void*)>>> & list) {
-    if (memory->seen) {
-        return;
-    }
-    memory->seen = true;
-    auto & mem = memory->memory;
-    auto & indexes = memory->indexes;
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     assert(indexes.size() == mem.size());
 #endif
     for (auto itr = mem.rbegin(); itr != mem.rend(); itr++) {
         auto & info = *itr;
-        if (!info.is_ptr || info.ptr_is_ref) {
-            auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
-            if (ref.get() != nullptr) {
-                if (ref->memory->seen) {
-                    // skip this reference, we are already processing it somewhere else so we dont want to touch it
-                    continue;
+        if (!info.ptr_is_ref) {
+            if (get_memory()->color == MANAGED_OBJECT_HEAP_COLOR_WHITE) {
+                for (auto itr2 = indexes.rbegin(); itr2 != indexes.rend(); itr2++) {
+                    if (*itr2 == info.index) {
+                        auto it2 = std::next(itr2).base();
+                        indexes.erase(it2, std::next(it2));
+                        break;
+                    }
                 }
-                ref->do_prune(list);
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+                printf("QUEUE DESTRUCTOR - %p\n", info.ptr);
+#endif
+                list.emplace_back(std::move(info.ptr), std::move(info.destructor));
+                info.ptr = nullptr;
+                auto it = std::next(itr).base();
+                mem.erase(it, std::next(it));
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
                 assert(indexes.size() == mem.size());
 #endif
-                if (ref->sweep) {
+            }
+        } else {
+            ManagedObjectHeap * ref = MANAGED_OBJECT_GET_HEAP(info);
+            if (ref != nullptr) {
+                if (ref->get_memory()->seen) {
+                    // skip this reference, we are already processing it somewhere else so we dont want to touch it
+                    continue;
+                }
+                ref->do_sweep(list, memory_list);
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-                    printf("REMOVING OBJECT '%s' ONLY\n", ref->tag);
+                assert(indexes.size() == mem.size());
+#endif
+                if (ref->get_memory()->keep_memory) {
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+                    printf("REMOVING OBJECT '%s' (ref %p, mem %p) WITHOUT REMOVING ITS MEMORY\n", ref->tag, ref, ref->get_memory());
 #endif
                     for (auto itr2 = indexes.rbegin(); itr2 != indexes.rend(); itr2++) {
                         if (*itr2 == info.index) {
@@ -452,21 +364,23 @@ void ManagedObjectHeap::do_prune(std::vector<std::pair<void*, std::function<void
                             break;
                         }
                     }
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+                    printf("QUEUE DESTRUCTOR - %p\n", info.ptr);
+#endif
+                    list.emplace_back(std::move(info.ptr), std::move(info.destructor));
+                    info.ptr = nullptr;
                     auto it = std::next(itr).base();
                     mem.erase(it, std::next(it));
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
                     assert(indexes.size() == mem.size());
 #endif
-                } else if (ref->memory->sweep) {
+                } else if (ref->get_memory()->color == MANAGED_OBJECT_HEAP_COLOR_WHITE) {
+                    ref->get_memory()->keep_memory = true;
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-                    if (info.ptr_is_ref) {
-                        printf("REMOVING OBJECT '%s' (ref %p) AND ITS MEMORY\n", ref->tag, info.ptr);
-                    } else {
-                        printf("REMOVING OBJECT '%s' AND ITS MEMORY\n", ref->tag);
-                    }
+                    printf("REMOVING OBJECT '%s' (ref %p, mem %p) AND ITS MEMORY\n", ref->tag, ref, ref->get_memory());
 #endif
-                    auto & mem2 = ref->memory->memory;
-                    auto & indexes2 = ref->memory->indexes;
+                    auto & mem2 = ref->get_memory()->memory;
+                    auto & indexes2 = ref->get_memory()->indexes;
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
                     assert(indexes.size() == mem.size());
                     assert(indexes2.size() == mem2.size());
@@ -477,13 +391,11 @@ void ManagedObjectHeap::do_prune(std::vector<std::pair<void*, std::function<void
                         printf("obtaining info2 at %zu\n", *it2);
 #endif
                         auto & info2 = mem2[*it2];
-                        if (info2.is_ptr) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-                            printf("QUEUE DESTRUCTOR\n");
+                        printf("QUEUE DESTRUCTOR - %p\n", info2.ptr);
 #endif
-                            list.emplace_back(std::move(info2.ptr), std::move(info2.destructor));
-                            info2.ptr = nullptr;
-                        }
+                        list.emplace_back(std::move(info2.ptr), std::move(info2.destructor));
+                        info2.ptr = nullptr;
                         for (auto itr3 = mem2.rbegin(); itr != mem2.rend(); itr3++) {
                             if (*itr2 == itr3->index) {
                                 auto it3 = std::next(itr3).base();
@@ -503,13 +415,25 @@ void ManagedObjectHeap::do_prune(std::vector<std::pair<void*, std::function<void
                             break;
                         }
                     }
-                    if (info.ptr_is_ref) {
+
+                    if (mem2.size() == 0) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-                        printf("QUEUE DESTRUCTOR\n");
+                        printf("QUEUE MEMORY DESTRUCTOR - %p\n", ref->get_memory());
 #endif
-                        list.emplace_back(std::move(info.ptr), std::move(info.destructor));
-                        info.ptr = nullptr;
+                        memory_list.emplace_back(std::move(ref->get_memory()), std::move(+[](void*p){
+                            #ifdef MANAGED_OBJECT_HEAP_DEBUG
+                                printf("DELETE MEMORY FOR MANAGED_HEAP\n");
+                            #endif
+                            delete static_cast<Memory*>(p);
+                        }));
                     }
+
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+                    printf("QUEUE DESTRUCTOR - %p\n", info.ptr);
+#endif
+                    list.emplace_back(std::move(info.ptr), std::move(info.destructor));
+                    info.ptr = nullptr;
+
                     auto it = std::next(itr).base();
                     mem.erase(it, std::next(it));
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
@@ -519,33 +443,33 @@ void ManagedObjectHeap::do_prune(std::vector<std::pair<void*, std::function<void
             }
         }
     }
-    memory->seen = false;
+    get_memory()->seen = false;
 }
 
 void ManagedObjectHeap::color() {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
+    assert(!get_memory()->seen);
 #endif
     color([](){});
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!memory->seen);
+    assert(!get_memory()->seen);
 #endif
 }
 
 void ManagedObjectHeap::color(std::function<void()> prefix) {
-    size_t m = memory->memory.size();
+    size_t m = get_memory()->memory.size();
     if (m == 0) {
         prefix();
-        printf("[%p, %s [%s] ", this, tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(memory->color));
+        printf("[(ref %p, mem %p), %s [%s] ", this, get_memory(), tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(get_memory()->color));
         if (deallocated) {
             printf("[deallocated] ");
         }
         printf("[ZERO SIZE] ]\n");
         return;
     }
-    if (memory->seen) {
+    if (get_memory()->seen) {
         prefix();
-        printf("[%p, %s [%s] ", this, tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(memory->color));
+        printf("[(ref %p, mem %p), %s [%s] ", this, get_memory(), tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(get_memory()->color));
         if (deallocated) {
             printf("[deallocated] ");
         }
@@ -554,36 +478,32 @@ void ManagedObjectHeap::color(std::function<void()> prefix) {
     }
     if (deallocated) {
         prefix();
-        printf("[%p, %s [%s] [deallocated] ]\n", this, tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(memory->color));
+        printf("[(ref %p, mem %p), %s [%s] [deallocated] ]\n", this, get_memory(), tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(get_memory()->color));
     }
-    memory->seen = true;
+    get_memory()->seen = true;
     for (int i = 0; i < m; i++) {
-        auto & info = memory->memory[i];
-        if (info.is_ptr && !info.ptr_is_ref) {
+        auto & info = get_memory()->memory[i];
+        if (!info.ptr_is_ref) {
             prefix();
-            printf("[%p, %s [%s] ", this, tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(memory->color));
+            printf("[(ref %p, mem %p), %s [%s] ", this, get_memory(), tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(get_memory()->color));
             if (deallocated) {
                 printf("[deallocated] ");
             }
             printf("] memory[%d] = %p\n", i, info.ptr);
         } else {
-            auto & ref = info.ptr_is_ref ? (info.ptr == nullptr ? empty_heap() : static_cast<ManagedObjectHeap::HeapHolder*>(info.ptr)->heap) : info.ref;
-            if (ref.get() != nullptr) {
+            ManagedObjectHeap * ref = MANAGED_OBJECT_GET_HEAP(info);
+            if (ref != nullptr) {
                 ref->color([&, this]() {
                     prefix();
-                    printf("[%p, %s [%s] ", this, tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(memory->color));
+                    printf("[(ref %p, mem %p), %s [%s] ", this, get_memory(), tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(get_memory()->color));
                     if (deallocated) {
                         printf("[deallocated] ");
                     }
-                    if (info.ptr_is_ref) {
-                        printf("] memory[%d] = (ref %p) ", i, info.ptr);
-                    } else {
-                        printf("] memory[%d] = ", i);
-                    }
+                    printf("] memory[%d] = ", i);
                 });
             } else {
                 prefix();
-                printf("[%p, %s [%s] ", this, tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(memory->color));
+                printf("[(ref %p, mem %p), %s [%s] ", this, get_memory(), tag, MANAGED_OBJECT_HEAP_COLOR_TO_STRING(get_memory()->color));
                 if (deallocated) {
                     printf("[deallocated] ");
                 }
@@ -591,20 +511,84 @@ void ManagedObjectHeap::color(std::function<void()> prefix) {
             }
         }
     }
-    memory->seen = false;
+    get_memory()->seen = false;
+}
+
+void ManagedObjectHeap::print() {
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    assert(!get_memory()->seen);
+#endif
+    print([](){});
+#ifdef MANAGED_OBJECT_HEAP_DEBUG
+    assert(!get_memory()->seen);
+#endif
+}
+
+void ManagedObjectHeap::print(std::function<void()> prefix) {
+    size_t m = get_memory()->memory.size();
+    if (m == 0) {
+        prefix();
+        printf("[(ref %p, mem %p), %s ", this, get_memory(), tag);
+        if (deallocated) {
+            printf("[deallocated] ");
+        }
+        printf("[ZERO SIZE] ]\n");
+        return;
+    }
+    if (get_memory()->seen) {
+        prefix();
+        printf("[(ref %p, mem %p), %s ", this, get_memory(), tag);
+        if (deallocated) {
+            printf("[deallocated] ");
+        }
+        printf("[CYCLIC DETECTED] ]\n");
+        return;
+    }
+    if (deallocated) {
+        prefix();
+        printf("[(ref %p, mem %p), %s [deallocated] ]\n", this, get_memory(), tag);
+        return;
+    }
+    get_memory()->seen = true;
+    for (int i = 0; i < m; i++) {
+        auto & info = get_memory()->memory[i];
+        if (!info.ptr_is_ref) {
+            prefix();
+            printf("[(ref %p, mem %p), %s] memory[%d] = %p\n", this, get_memory(), tag, i, info.ptr);
+        } else {
+            ManagedObjectHeap * ref = MANAGED_OBJECT_GET_HEAP(info);
+            if (ref != nullptr) {
+                ref->print([&, this](){
+                    prefix();
+                    if (info.ptr_is_ref) {
+                        printf("[(ref %p, mem %p), %s] memory[%d] = (ref %p, mem %p) ", this, get_memory(), tag, i, ref, ref->get_memory());
+                    } else {
+                        printf("[(ref %p, mem %p), %s] memory[%d] = ", this, get_memory(), tag, i);
+                    }
+                });
+            } else {
+                prefix();
+                printf("[(ref %p, mem %p), %s] memory[%d] = %p\n", this, get_memory(), tag, i, nullptr);
+            }
+        }
+    }
+    get_memory()->seen = false;
 }
 
 size_t ManagedObjectHeap::push() {
-    size_t index = memory->memory.size();
-    memory->indexes.push_back(index);
-    memory->memory.emplace_back(index);
+    Memory * m = get_memory();
+    size_t index = m->memory.size();
+    m->indexes.push_back(index);
+    m->memory.emplace_back(index);
     return index;
 }
 
-std::shared_ptr<ManagedObjectHeap> ManagedObjectHeap::make() {
-    return std::make_shared<ManagedObjectHeap>();
-}
-
-std::shared_ptr<ManagedObjectHeap> ManagedObjectHeap::make(const char * tag) {
-    return std::make_shared<ManagedObjectHeap>(tag);
+size_t ManagedObjectHeap::push(ManagedObjectHeap * value) {
+    Memory * m = get_memory();
+    size_t index = m->memory.size();
+    m->indexes.push_back(index);
+    m->memory.emplace_back(index);
+    auto & info = m->memory.back();
+    info = value;
+    return index;
 }

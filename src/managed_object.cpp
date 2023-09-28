@@ -1,6 +1,6 @@
 #include <managed_object.h>
 
-std::shared_ptr<ManagedObjectHeap> & ManagedObject::get_root() {
+ManagedObjectHeap * ManagedObject::get_root() {
     return ManagedObjectHeap::get_root();
 }
 
@@ -8,9 +8,9 @@ ManagedObject::ManagedObject() : ManagedObject("no name") {}
 
 ManagedObject::ManagedObject(const char * tag) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    printf("CREATE VARIABLE %p, %s\n", this, tag);
+    printf("CREATE VARIABLE %p, '%s'\n", this, tag);
 #endif
-    heap = ManagedObjectHeap::make(tag);
+    heap = new ManagedObjectHeap(tag);
     get_root()->push(heap); // reference
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     get_root()->print();
@@ -19,13 +19,14 @@ ManagedObject::ManagedObject(const char * tag) {
 
 ManagedObject::ManagedObject(const ManagedObject & other) {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    printf("CREATE VARIABLE %s\n", other.heap->tag);
+    printf("CREATE VARIABLE %p, '%s'\n", this, other.heap->tag);
 #endif
-    heap = ManagedObjectHeap::make(other.heap->tag);
+    heap = new ManagedObjectHeap(other.heap->tag);
     heap->memory = other.heap->memory; // copy of reference
+    heap->get_memory_ = other.heap->get_memory_;
     heap->deallocated = other.heap->deallocated; // copy deallocated flag
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!heap->memory->seen);
+    assert(!heap->get_memory()->seen);
 #endif
     get_root()->push(heap); // reference
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
@@ -34,52 +35,39 @@ ManagedObject::ManagedObject(const ManagedObject & other) {
 }
 
 ManagedObject & ManagedObject::operator=(const ManagedObject & other) {
+    if (this == &other) {
+        return *this;
+    }
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    printf("ASSIGN VARIABLE %s TO VARIABLE %s\n", other.heap->tag, heap->tag);
+    printf("ASSIGN VARIABLE '%s' TO VARIABLE '%s'\n", other.heap->tag, heap->tag);
 #endif
     auto root = get_root();
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     root->print();
 #endif
-    auto old = heap;
+
+    // offload heap to root
+    auto old = new ManagedObjectHeap(heap->tag);
+    *old = std::move(*heap);
+    root->push(old);
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
     printf("copying memory reference\n");
 #endif
-    heap = ManagedObjectHeap::make(old->tag);
-    heap->memory = other.heap->memory; // copy of reference
-    heap->deallocated = other.heap->deallocated; // copy deallocated flag
+    *heap = *other.heap; // copy
+    heap->tag = old->tag;
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    assert(!heap->memory->seen);
+    get_root()->print();
+    printf("DEALLOC OLD VARIABLE '%s'\n", old->tag);
 #endif
-    if (parent != nullptr) {
+    old->dealloc(root);
+
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-        root->print();
+    root->print();
 #endif
-        parent->heap->push(heap); // reference
+
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-        root->print();
+    assert(!heap->get_memory()->seen);
 #endif
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-        printf("DEALLOC VARIABLE %s\n", old->tag);
-#endif
-        old->dealloc(root);
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-        root->print();
-#endif
-    } else {
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-        root->print();
-#endif
-        root->push(heap); // reference
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-        root->print();
-        printf("DEALLOC VARIABLE %s\n", old->tag);
-#endif
-        old->dealloc(root);
-#ifdef MANAGED_OBJECT_HEAP_DEBUG
-        root->print();
-#endif
-    }
     return *this;
 }
 
@@ -89,7 +77,7 @@ ManagedObject::~ManagedObject() {
 
 void ManagedObject::dealloc() {
 #ifdef MANAGED_OBJECT_HEAP_DEBUG
-    printf("DEALLOC VARIABLE %s\n", heap->tag);
+    printf("DEALLOC VARIABLE '%s'\n", heap->tag);
 #endif
     heap->dealloc(get_root());
 }
