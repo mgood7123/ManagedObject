@@ -70,7 +70,6 @@ typedef struct managed_obj_metadata_hashtable_s {
   managed_obj_metadata_cmp_t cmp;                   /* comparison function */
   mps_ld_s ld;                                      /* location dependency */
   mps_ap_t key_ap, value_ap;                        /* allocation points for keys and values */
-  int key_is_weak, value_is_weak;                   /* is a key or value is not weak, then it must be scanned */
   managed_obj_metadata_buckets_t keys, values;      /* hash buckets for keys and values */
 } managed_obj_metadata_hashtable_s;
 
@@ -147,6 +146,16 @@ typedef struct managed_obj_metadata_method_s {
 #define MANAGED_OBJECT_METADATA_TAG_COUNT(i) (((i) << 1) + 1)
 #define MANAGED_OBJECT_METADATA_UNTAG_COUNT(i) ((i) >> 1)
 
+#define MANAGED_OBJECT_METADATA_SOURCE_PREINIT \
+    if (state == &managed_obj_global_metadata) { \
+        if (managed_obj_global_metadata_init == 2) { \
+            return; \
+        } \
+        if (managed_obj_global_metadata_init == 1) { \
+            managed_obj_global_metadata_init = 2; \
+        } \
+    } \
+
 #define MANAGED_OBJECT_METADATA_SOURCE_INIT \
   LockClaimGlobalRecursive(); \
     if (managed_obj_global_metadata_init == 0) { \
@@ -154,7 +163,6 @@ typedef struct managed_obj_metadata_method_s {
         managed_obj_init_with_user_memory(&managed_obj_global_metadata, 4096*2, &managed_obj_global_metadata_ids, sizeof(managed_obj_global_metadata_ht_keys_s)); \
         managed_obj_global_metadata_ids.unused = managed_obj_make_empty(&managed_obj_global_metadata); \
         managed_obj_global_metadata_ids.deleted = managed_obj_make_empty(&managed_obj_global_metadata); \
-\
     } \
   LockReleaseGlobalRecursive(); \
 \
@@ -195,6 +203,7 @@ typedef struct managed_obj_metadata_method_s {
 
 #define MANAGED_OBJECT_METADATA_SCAN \
       case MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE_BUCKET: { \
+        printf("scan bucket %p\n", base); \
         size_t i, length = MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.length); \
         MANAGED_OBJECT_FIX(obj->metadata_bucket.dependent); \
         if(obj->metadata_bucket.dependent != NULL) { \
@@ -223,23 +232,10 @@ typedef struct managed_obj_metadata_method_s {
         break; \
       } \
       case MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE: { \
+        printf("scan hash %p\n", base); \
         size_t i, length; \
-        printf("scan keys %p\n", obj->metadata_hashtable.keys); \
         MANAGED_OBJECT_FIX(obj->metadata_hashtable.keys); \
-        if (obj->metadata_hashtable.key_is_weak == 0) { \
-            length = MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_hashtable.keys->length); \
-            for (i = 0; i < length; ++i) { \
-                MANAGED_OBJECT_FIX(obj->metadata_hashtable.keys->bucket[i]); \
-            } \
-        } \
-        printf("scan values %p\n", obj->metadata_hashtable.values); \
         MANAGED_OBJECT_FIX(obj->metadata_hashtable.values); \
-        if (obj->metadata_hashtable.value_is_weak == 0) { \
-            length = MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_hashtable.values->length); \
-            for (i = 0; i < length; ++i) { \
-                MANAGED_OBJECT_FIX(obj->metadata_hashtable.values->bucket[i]); \
-            } \
-        } \
         base = (char *)base + MANAGED_OBJECT_ALIGN_OBJ(sizeof(managed_obj_metadata_hashtable_s)); \
         break; } \
       case MANAGED_OBJECT_TYPE_METADATA_STRING: \
@@ -423,8 +419,6 @@ managed_obj_t managed_obj_metadata_make_table(ManagedObjState * state, size_t le
         for(l = 1; l < length; l *= 2); \
         obj->metadata_hashtable.key_ap = weak_key ? state->weak_buckets_ap : state->strong_buckets_ap; \
         obj->metadata_hashtable.value_ap = weak_value ? state->weak_buckets_ap : state->strong_buckets_ap; \
-        obj->metadata_hashtable.key_is_weak = weak_key; \
-        obj->metadata_hashtable.value_is_weak = weak_value; \
         obj->metadata_hashtable.keys = (managed_obj_metadata_buckets_t)managed_obj_metadata_make_buckets(state, l, obj->metadata_hashtable.key_ap); \
         obj->metadata_hashtable.values = (managed_obj_metadata_buckets_t)managed_obj_metadata_make_buckets(state, l, obj->metadata_hashtable.value_ap); \
         obj->metadata_hashtable.keys->dependent = obj->metadata_hashtable.values; \
@@ -492,6 +486,7 @@ unsigned long managed_obj_metadata_string_hash(ManagedObjState * state, managed_
 { \
   UNUSED(state); \
   UNUSED(ld); \
+    printf("hashing: hashing object %p\n", obj); \
   if(MANAGED_OBJECT_TYPE(obj) != MANAGED_OBJECT_TYPE_METADATA_STRING) \
     managed_obj_error("string-hash: argument must be a string"); \
   return managed_obj_metadata_hash(obj->metadata_string.string, obj->metadata_string.length); \
@@ -518,6 +513,7 @@ int managed_obj_metadata_buckets_find(ManagedObjState * state, managed_obj_t tbl
   i = h; \
   do { \
     managed_obj_t k = buckets->bucket[i]; \
+    printf("find bucket: comparing key %p against wanted key %p\n", k, key); \
     if(k == managed_obj_global_metadata_ids.unused || tbl->metadata_hashtable.cmp(k, key)) { \
       *b = i; \
       return 1; \
@@ -552,6 +548,7 @@ size_t managed_obj_metadata_table_size(managed_obj_t tbl) \
  */ \
 int managed_obj_metadata_table_rehash(ManagedObjState * state, managed_obj_t tbl, size_t new_length, managed_obj_t key, size_t *key_bucket) \
 { \
+    printf("rehash keys\n"); \
   size_t i, length; \
   managed_obj_metadata_buckets_t new_keys, new_values; \
   int result = 0; \
@@ -585,6 +582,7 @@ int managed_obj_metadata_table_rehash(ManagedObjState * state, managed_obj_t tbl
   AVER(MANAGED_OBJECT_METADATA_UNTAG_COUNT(new_keys->used) == managed_obj_metadata_table_size(tbl)); \
   tbl->metadata_hashtable.keys = new_keys; \
   tbl->metadata_hashtable.values = new_values; \
+    printf("rehashed keys\n"); \
   return result; \
 } \
 \
@@ -595,6 +593,7 @@ int managed_obj_metadata_table_rehash(ManagedObjState * state, managed_obj_t tbl
  */ \
 int managed_obj_metadata_table_find(ManagedObjState * state, managed_obj_t tbl, managed_obj_t key, int add, size_t *b) \
 { \
+    printf("find table: finding wanted key %p\n", key); \
   if (!managed_obj_metadata_buckets_find(state, tbl, tbl->metadata_hashtable.keys, key, add, b)) { \
     return 0; \
   } else if ((tbl->metadata_hashtable.keys->bucket[*b] == managed_obj_global_metadata_ids.unused \

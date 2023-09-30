@@ -369,14 +369,7 @@ void managed_obj_init(ManagedObjState * state, size_t arena_size) {
     if (state == NULL) {
         managed_obj_error("state cannot be null");
     }
-    if (state == &managed_obj_global_metadata) {
-        if (managed_obj_global_metadata_init == 2) {
-            return;
-        }
-        if (managed_obj_global_metadata_init == 1) {
-            managed_obj_global_metadata_init = 2;
-        }
-    }
+    MANAGED_OBJECT_METADATA_SOURCE_PREINIT
     memset(state, 0, sizeof(ManagedObjState));
 
     mps_res_t res;
@@ -490,14 +483,7 @@ void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_siz
     if (state == NULL) {
         managed_obj_error("state cannot be null");
     }
-    if (state == &managed_obj_global_metadata) {
-        if (managed_obj_global_metadata_init == 2) {
-            return;
-        }
-        if (managed_obj_global_metadata_init == 1) {
-            managed_obj_global_metadata_init = 2;
-        }
-    }
+    MANAGED_OBJECT_METADATA_SOURCE_PREINIT
     memset(state, 0, sizeof(ManagedObjState));
 
     mps_res_t res;
@@ -517,14 +503,15 @@ void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_siz
 
     /* Make sure we can pick up finalization messages. */
     mps_message_type_enable(state->arena, mps_message_type_finalization());
-
-  memset(user_memory, 0, user_memory_size);
-  res = mps_root_create_area_tagged(
-      &state->thread_stack_root, state->arena, mps_rank_ambig(),
-      (mps_rm_t)0, user_memory, user_memory+user_memory_size,
-      mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
-  );
-  if (res != MPS_RES_OK) managed_obj_error("Couldn't create user memory root");
+  if (user_memory != NULL || user_memory_size != 0) {
+    memset(user_memory, 0, user_memory_size);
+    res = mps_root_create_area_tagged(
+        &state->thread_stack_root, state->arena, mps_rank_ambig(),
+        (mps_rm_t)0, user_memory, user_memory+user_memory_size,
+        mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
+    );
+    if (res != MPS_RES_OK) managed_obj_error("Couldn't create user memory root");
+  }
 
   /* Create the object format. This gathers together the methods that
      the MPS uses to interrogate your objects via the Format Protocol.

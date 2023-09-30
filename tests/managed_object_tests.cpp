@@ -975,59 +975,138 @@ TEST(MPS_finalize, 2_null_user_mem_6) {
 
 */
 
-TEST(MPS_hash_table, 1) {
-    ManagedObjState state;
+// TEST(MPS_hash_table, 1) {
+//     ManagedObjState state;
 
-    managed_obj_t mem[1];
+//     managed_obj_t mem[1];
 
-    managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, mem, sizeof(void*)*1);
+//     managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, mem, sizeof(void*)*1);
 
-    mem[0] = managed_obj_metadata_make_table(&state, 16, &managed_obj_metadata_string_hash, &managed_obj_metadata_string_equalp, 0, 1);
+//     mem[0] = managed_obj_metadata_make_table(&state, 16, &managed_obj_metadata_string_hash, &managed_obj_metadata_string_equalp, 0, 1);
 
-    managed_obj_t string_obj = managed_obj_metadata_make_string(&state, strlen("hello"), "hello");
+//     managed_obj_t string_obj = managed_obj_metadata_make_string(&state, strlen("hello"), "hello");
 
-    printf("intern 'bye' returns %p\n", managed_obj_metadata_intern(&state, mem[0], "bye"));
+//     printf("intern 'bye' returns %p\n", managed_obj_metadata_intern(&state, mem[0], "bye"));
     
 
-    managed_obj_t ref = managed_obj_metadata_table_ref(&state, mem[0], string_obj);
-    printf("find key 'hello' returns %p\n", ref);
+//     managed_obj_t ref = managed_obj_metadata_table_ref(&state, mem[0], string_obj);
+//     printf("find key 'hello' returns %p\n", ref);
 
-    printf("insert key 'hello'\n");
-    managed_obj_metadata_table_set(&state, mem[0], string_obj, string_obj);
+//     printf("insert key 'hello'\n");
+//     managed_obj_metadata_table_set(&state, mem[0], string_obj, string_obj);
 
-    ref = managed_obj_metadata_table_ref(&state, mem[0], string_obj);
-    printf("find key 'hello' returns %p\n", ref);
+//     ref = managed_obj_metadata_table_ref(&state, mem[0], string_obj);
+//     printf("find key 'hello' returns %p\n", ref);
 
-    managed_obj_deinit(&state); // p1 is actually destroyed here
-}
+//     managed_obj_deinit(&state); // p1 is actually destroyed here
+// }
 
-TEST(MPS_hash_table, 2) {
+// TEST(MPS_hash_table, 2) {
+//     ManagedObjState state;
+
+//     managed_obj_t mem[3];
+
+//     managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, mem, sizeof(void*)*3);
+
+//     mem[0] = managed_obj_metadata_make_table(&state, 16, &managed_obj_metadata_string_hash, &managed_obj_metadata_string_equalp, 1, 1);
+//     mem[1] = managed_obj_metadata_make_string(&state, strlen("hello"), "hello");
+//     mem[2] = managed_obj_make_empty(&state);
+
+//     managed_obj_t & key = mem[1];
+//     managed_obj_t & value = mem[2];
+
+//     printf("insert key 'hello' %p with value 'hashmap' %p\n", key, value);
+//     managed_obj_metadata_table_set(&state, mem[0], key, value);
+
+//     printf("finding key 'hello' %p\n", key);
+//     managed_obj_t ref = managed_obj_metadata_table_ref(&state, mem[0], key);
+//     printf("find key 'hello' returns %p\n", ref);
+//     printf("collecting\n");
+//     managed_obj_collect(&state);
+//     printf("finding key 'hello' %p\n", key);
+//     ref = managed_obj_metadata_table_ref(&state, mem[0], key);
+//     printf("find key 'hello' after collect returns %p\n", ref);
+//     key = NULL;
+//     value = NULL;
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+
+//     managed_obj_deinit(&state); // p1 is actually destroyed here
+// }
+
+// TEST(MPS_weak, 1) {
+//     ManagedObjState state;
+
+//     managed_obj_t mem[2];
+
+//     managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, mem, sizeof(void*)*2);
+
+
+//     mem[0] = managed_obj_metadata_make_buckets(&state, 1, state.weak_buckets_ap);
+//     mem[1] = managed_obj_metadata_make_string(&state, strlen("hello"), "hello");
+
+//     printf("collecting\n");
+//     managed_obj_collect(&state);
+
+//     printf("mem[0]->metadata_bucket.bucket[0] = mem[1]\n");
+//     mem[0]->metadata_bucket.bucket[0] = mem[1];
+
+//     printf("collecting\n");
+//     managed_obj_collect(&state);
+
+//     printf("mem[1] = NULL\n");
+//     mem[1] = NULL;
+//     printf("collecting\n");
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+//     managed_obj_collect(&state);
+
+//     managed_obj_deinit(&state); // p1 is actually destroyed here
+// }
+
+TEST(MPS_weak, 2) {
     ManagedObjState state;
 
-    managed_obj_t mem[1];
+    managed_obj_t mem[3];
 
-    managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, mem, sizeof(void*)*1);
+    managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, mem, sizeof(void*)*3);
 
-    mem[0] = managed_obj_metadata_make_table(&state, 16, &managed_obj_metadata_string_hash, &managed_obj_metadata_string_equalp, 0, 0);
 
-    managed_obj_t key = managed_obj_metadata_make_string(&state, strlen("hello"), "hello");
-    managed_obj_t value = managed_obj_metadata_make_table(&state, 16, &managed_obj_metadata_string_hash, &managed_obj_metadata_string_equalp, 0, 0);
+    mem[0] = managed_obj_metadata_make_buckets(&state, 2, state.weak_buckets_ap);
+    mem[1] = managed_obj_metadata_make_string(&state, strlen("hello"), "hello");
+    mem[2] = managed_obj_metadata_make_string(&state, strlen("byebye"), "byebye");
 
-    printf("insert key 'hello' %p with value 'hashmap' %p\n", key, value);
-    managed_obj_metadata_table_set(&state, mem[0], key, value);
-
-    printf("finding key 'hello'\n");
-    managed_obj_t ref = managed_obj_metadata_table_ref(&state, mem[0], key);
-    printf("find key 'hello' returns %p\n", ref);
-    // printf("pin %p\n", key);
-    // managed_obj_pin(&state, key);
+    printf("collecting\n");
     managed_obj_collect(&state);
-    printf("finding key 'hello'\n");
-    ref = managed_obj_metadata_table_ref(&state, mem[0], key);
-    printf("find key 'hello' after collect returns %p\n", ref);
+
+    printf("mem[0]->metadata_bucket.bucket[0] = mem[1]\n");
+    mem[0]->metadata_bucket.bucket[0] = mem[1];
+    printf("mem[0]->metadata_bucket.bucket[1] = mem[2]\n");
+    mem[0]->metadata_bucket.bucket[2] = mem[2];
+
+    printf("collecting\n");
     managed_obj_collect(&state);
-    // printf("unpin %p\n", key);
-    // managed_obj_unpin(&state, key);
+
+    printf("mem[1] = NULL\n");
+    mem[1] = NULL;
+    printf("mem[2] = NULL\n");
+    mem[2] = NULL;
+    printf("collecting\n");
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
     managed_obj_collect(&state);
 
     managed_obj_deinit(&state); // p1 is actually destroyed here

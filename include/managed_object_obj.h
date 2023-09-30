@@ -31,6 +31,20 @@ typedef struct ManagedObjState ManagedObjState;
 
 #include "managed_object_obj_metadata.h"
 
+// #ifndef MANAGED_OBJECT____OBJ_METADATA_H
+// #define MANAGED_OBJECT_METADATA_ENUMS MANAGED_OBJECT_METADATA_ENUMS
+// #define MANAGED_OBJECT_METADATA_UNIONS
+// #define MANAGED_OBJECT_METADATA_FINALIZE
+// #define MANAGED_OBJECT_METADATA_HEADER_FUNCTIONS
+// #define MANAGED_OBJECT_METADATA_SOURCE_FUNCTIONS
+// #define MANAGED_OBJECT_METADATA_SCAN
+// #define MANAGED_OBJECT_METADATA_SKIP
+// #define MANAGED_OBJECT_METADATA_SOURCE_PREINIT
+// #define MANAGED_OBJECT_METADATA_SOURCE_INIT
+// #define MANAGED_OBJECT_METADATA_SOURCE_DEINIT
+// #define MANAGED_OBJECT_METADATA_STATE
+// #endif
+
 struct ManagedObjState {
     /* MPS globals                                                  %%MPS
     *
@@ -69,6 +83,7 @@ struct ManagedObjState {
     mps_root_t pinned_root;
 
     MANAGED_OBJECT_METADATA_STATE
+    
     size_t allocated_bytes;
     size_t freed_bytes;
     size_t allocated_obj_bytes;
