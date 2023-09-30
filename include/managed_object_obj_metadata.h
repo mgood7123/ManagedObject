@@ -205,28 +205,34 @@ typedef struct managed_obj_metadata_method_s {
       case MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE_BUCKET: { \
         printf("scan bucket %p\n", base); \
         size_t i, length = MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.length); \
-        MANAGED_OBJECT_FIX(obj->metadata_bucket.dependent); \
         if(obj->metadata_bucket.dependent != NULL) { \
+            printf("scan bucket dependent %p\n", base); \
+            MANAGED_OBJECT_FIX(obj->metadata_bucket.dependent); \
             AVER(obj->metadata_bucket.dependent->length == obj->metadata_bucket.length); \
         } \
         for (i = 0; i < length; ++i) { \
             mps_addr_t p = obj->metadata_bucket.bucket[i]; \
-            printf("scan bucket address %p\n", p); \
+            printf("scan obj->metadata_bucket.bucket[%zu] with value of %p\n", i, p); \
             if (MPS_FIX1(ss, p)) { \
               mps_res_t res = MPS_FIX2(ss, &p); \
               if (res != MPS_RES_OK) return res; \
               if (p == NULL) { \
-                printf("bucket address became NULL\n"); \
+                printf("scan obj->metadata_bucket.bucket[%zu] became %p\n", i, p); \
                 /* key/value was splatted: splat value/key too */ \
                 p = managed_obj_global_metadata_ids.deleted; \
+                printf("scan obj->metadata_bucket.bucket[%zu] became %p [deleted]\n", i, p); \
                 obj->metadata_bucket.deleted = MANAGED_OBJECT_METADATA_TAG_COUNT(MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.deleted) + 1); \
                 if (obj->metadata_bucket.dependent != NULL) { \
                     obj->metadata_bucket.dependent->bucket[i] = p; \
+                    printf("scan obj->metadata_bucket.dependent->bucket[%zu] became %p [deleted]\n", i, p); \
                     obj->metadata_bucket.dependent->deleted \
                         = MANAGED_OBJECT_METADATA_TAG_COUNT(MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.dependent->deleted) + 1); \
                 } \
               } \
-              obj->metadata_bucket.bucket[i] = p; \
+              if (obj->metadata_bucket.bucket[i] != p) { \
+                printf("scan obj->metadata_bucket.bucket[%zu] assigned value of %p\n", i, p); \
+                obj->metadata_bucket.bucket[i] = p; \
+              } \
             } \
         } \
         base = (char *)base + MANAGED_OBJECT_ALIGN_OBJ(offsetof(managed_obj_metadata_buckets_s, bucket) + \

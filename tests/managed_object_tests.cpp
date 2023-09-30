@@ -1091,7 +1091,7 @@ TEST(MPS_weak, 2) {
     printf("mem[0]->metadata_bucket.bucket[0] = mem[1]\n");
     mem[0]->metadata_bucket.bucket[0] = mem[1];
     printf("mem[0]->metadata_bucket.bucket[1] = mem[2]\n");
-    mem[0]->metadata_bucket.bucket[2] = mem[2];
+    mem[0]->metadata_bucket.bucket[1] = mem[2];
 
     printf("collecting\n");
     managed_obj_collect(&state);
@@ -1100,6 +1100,49 @@ TEST(MPS_weak, 2) {
     mem[1] = NULL;
     printf("mem[2] = NULL\n");
     mem[2] = NULL;
+    printf("collecting\n");
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+    managed_obj_collect(&state);
+
+    managed_obj_deinit(&state); // p1 is actually destroyed here
+}
+
+TEST(MPS_weak, 3) {
+    ManagedObjState state;
+
+    managed_obj_t mem[4];
+
+    managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, mem, sizeof(void*)*4);
+
+
+    mem[0] = managed_obj_metadata_make_buckets(&state, 1, state.weak_buckets_ap);
+    mem[1] = managed_obj_metadata_make_buckets(&state, 1, state.weak_buckets_ap);
+    mem[2] = managed_obj_metadata_make_string(&state, strlen("hello"), "hello");
+    mem[3] = managed_obj_metadata_make_string(&state, strlen("byebye"), "byebye");
+
+    mem[0]->metadata_bucket.dependent = (managed_obj_metadata_buckets_t) mem[1];
+    mem[1]->metadata_bucket.dependent = (managed_obj_metadata_buckets_t) mem[0];
+
+    printf("collecting\n");
+    managed_obj_collect(&state);
+
+    printf("mem[0]->metadata_bucket.bucket[0] = mem[2]\n");
+    mem[0]->metadata_bucket.bucket[0] = mem[2];
+    printf("mem[1]->metadata_bucket.bucket[0] = mem[3]\n");
+    mem[1]->metadata_bucket.bucket[0] = mem[3];
+
+    printf("collecting\n");
+    managed_obj_collect(&state);
+
+    printf("mem[2] = NULL\n");
+    mem[2] = NULL;
+    printf("mem[3] = NULL\n");
+    mem[3] = NULL;
     printf("collecting\n");
     managed_obj_collect(&state);
     managed_obj_collect(&state);

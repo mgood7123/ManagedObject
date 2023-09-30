@@ -288,10 +288,10 @@ void managed_obj_mps_chat(ManagedObjState * state) {
       condemned = mps_message_gc_condemned_size(state->arena, message);
       not_condemned = mps_message_gc_not_condemned_size(state->arena, message);
 
-      printf("\nCollection complete %d:\n", ++nComplete);
-      printf("  live %zu\n", live);
-      printf("  condemned %zu\n", condemned);
-      printf("  not_condemned %zu\n", not_condemned);
+      printf("\nCollection complete %d\n", ++nComplete);
+      // printf("  live %zu\n", live);
+      // printf("  condemned %zu\n", condemned);
+      // printf("  not_condemned %zu\n", not_condemned);
 
      } else if (type == mps_message_type_finalization()) {
       /* A finalization message is received when an object registered earlier
@@ -753,6 +753,8 @@ void managed_obj_unpin(ManagedObjState * state, managed_obj_t obj) {
 }
 
 void managed_obj_collect(ManagedObjState * state) {
+    printf("\nCollection start\n");
+
     unsigned long collect_start = mps_clock();
 
     mps_arena_collect(state->arena);
@@ -762,7 +764,8 @@ void managed_obj_collect(ManagedObjState * state) {
 
     ManagedObjTime collect_duration_time = managed_obj_convert_to_time(collect_end - collect_start);
 
-    printf("Total Collection duration: %d seconds, %d milliseconds, %d microseconds\n", collect_duration_time.seconds, collect_duration_time.milliseconds, collect_duration_time.microseconds);
+    printf("Collection end\n");
+    printf("Total Collection duration: %d seconds, %d milliseconds, %d microseconds\n\n", collect_duration_time.seconds, collect_duration_time.milliseconds, collect_duration_time.microseconds);
     managed_obj_print_stats(state);
 }
 
@@ -887,6 +890,7 @@ void managed_obj_deinit(ManagedObjState * state) {
 }
 
 void managed_obj_print_stats(ManagedObjState * state) {
+  return;
     size_t size_total;
     size_t size_free;
     size_t size_used;
