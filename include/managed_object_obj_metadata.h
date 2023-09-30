@@ -211,10 +211,12 @@ typedef struct managed_obj_metadata_method_s {
         } \
         for (i = 0; i < length; ++i) { \
             mps_addr_t p = obj->metadata_bucket.bucket[i]; \
+            printf("scan bucket address %p\n", p); \
             if (MPS_FIX1(ss, p)) { \
               mps_res_t res = MPS_FIX2(ss, &p); \
               if (res != MPS_RES_OK) return res; \
               if (p == NULL) { \
+                printf("bucket address became NULL\n"); \
                 /* key/value was splatted: splat value/key too */ \
                 p = managed_obj_global_metadata_ids.deleted; \
                 obj->metadata_bucket.deleted = MANAGED_OBJECT_METADATA_TAG_COUNT(MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.deleted) + 1); \
