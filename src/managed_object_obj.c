@@ -183,9 +183,11 @@ static void managed_obj_fwd(mps_addr_t old, mps_addr_t new)
     obj->fwd.fwd = (managed_obj_t)new;
     obj->fwd.size = size;
   }
+  /*
   if (old != new) {
     printf("object moved from address %p to address %p\n", old, new);
   }
+  */
 }
 
 /* managed_obj_pad -- object format padding method                      %%MPS
@@ -299,23 +301,22 @@ void managed_obj_mps_chat(ManagedObjState * state) {
         registered. This means there are no other references to the object.
         Note, however, that finalization isn't reliable or prompt.
         Treat it as an optimization. See topic/finalization. */
-
-      // TODO: in finalization we assume the user will supply a finalizer that will not resurrect the object
       
       managed_obj_t obj;
 
       mps_message_finalization_ref((mps_addr_t*)&obj, state->arena, message);
 
+      //printf("object %p is being finalized.\n", obj);
+
       if(MANAGED_OBJECT_TYPE(obj) == MANAGED_OBJECT_TYPE_EMPTY) {
         state->freed_obj_bytes += sizeof(managed_obj_empty_s);
         state->freed_aligned_obj_bytes += MANAGED_OBJECT_ALIGN_OBJ(sizeof(managed_obj_empty_s));
-        printf("object %p is being finalized.\n", obj);
       } else if(MANAGED_OBJECT_TYPE(obj) == MANAGED_OBJECT_TYPE_SCANNED_POINTER) {
         state->freed_obj_bytes += sizeof(managed_obj_scanned_pointer_s);
         state->freed_aligned_obj_bytes += MANAGED_OBJECT_ALIGN_OBJ(sizeof(managed_obj_scanned_pointer_s));
         if (obj->scanned_pointer.pointer) {
           if (obj->scanned_pointer.finalization_callback) {
-            printf("object %p with pointer %p is being finalized.\n", obj, obj->scanned_pointer.pointer);
+            printf("object %p has pointer %p.\n", obj, obj->scanned_pointer.pointer);
 
             // TODO: the user could resurrect the object at field 'obj->scanned_pointer.pointer'
             // TODO: the field 'obj->scanned_pointer.pointer' could contain a GC object not finalized yet
@@ -475,8 +476,6 @@ void managed_obj_init(ManagedObjState * state, size_t arena_size) {
   if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
 
     MANAGED_OBJECT_METADATA_SOURCE_INIT
-
-    managed_obj_print_stats(state);
 }
 
 void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_size, void * user_memory, size_t user_memory_size) {
@@ -506,7 +505,7 @@ void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_siz
   if (user_memory != NULL || user_memory_size != 0) {
     memset(user_memory, 0, user_memory_size);
     res = mps_root_create_area_tagged(
-        &state->thread_stack_root, state->arena, mps_rank_ambig(),
+        &state->thread_stack_root, state->arena, mps_rank_exact(),
         (mps_rm_t)0, user_memory, user_memory+user_memory_size,
         mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
     );
@@ -564,9 +563,6 @@ void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_siz
   if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
 
   MANAGED_OBJECT_METADATA_SOURCE_INIT
-
-  managed_obj_print_stats(state);
-
 }
 
 MANAGED_OBJECT_METADATA_SOURCE_FUNCTIONS
@@ -630,10 +626,6 @@ managed_obj_t managed_obj_make_scanned_with_finalizer(ManagedObjState * state, v
   state->allocated_obj_bytes += sizeof(managed_obj_scanned_pointer_s);
   state->allocated_aligned_obj_bytes += size;
 
-  printf("reserved and comitted object %p (with size %zu, aligned size %zu) with pointer %p\n", obj, sizeof(managed_obj_scanned_pointer_s), size, obj->scanned_pointer.pointer);
-
-  managed_obj_print_stats(state);
-
   mps_finalize(state->arena, (mps_addr_t*)&obj);
 
   return obj;
@@ -653,10 +645,6 @@ managed_obj_t managed_obj_make_empty(ManagedObjState * state)
   }
   state->allocated_obj_bytes += sizeof(managed_obj_empty_s);
   state->allocated_aligned_obj_bytes += size;
-
-  printf("reserved and comitted empty object %p (with size %zu, aligned size %zu)\n", obj, sizeof(managed_obj_empty_s), size);
-
-  managed_obj_print_stats(state);
 
   mps_finalize(state->arena, (mps_addr_t*)&obj);
 
@@ -766,7 +754,6 @@ void managed_obj_collect(ManagedObjState * state) {
 
     printf("Collection end\n");
     printf("Total Collection duration: %d seconds, %d milliseconds, %d microseconds\n\n", collect_duration_time.seconds, collect_duration_time.milliseconds, collect_duration_time.microseconds);
-    managed_obj_print_stats(state);
 }
 
 static Res rootDestroy(Root root, void *p)
@@ -859,8 +846,6 @@ void destroy_roots(mps_arena_t mps_arena) {
 void managed_obj_deinit(ManagedObjState * state) {
     mps_arena_park(state->arena);        /* ensure no collection is running */
 
-    managed_obj_print_stats(state);
-
     printf("deinit - destroy all roots\n");
 
     destroy_roots(state->arena);
@@ -873,6 +858,15 @@ void managed_obj_deinit(ManagedObjState * state) {
 
     printf("deinit - collected\n");
 
+    managed_obj_print_stats(state);
+
+    memset(state->pinned, 0, sizeof(managed_obj_t)*(state->pinned_capacity));
+    free(state->pinned);
+    state->pinned = NULL;
+    state->pinned_capacity = 0;
+    state->pinned_used = 0;
+
+
     printf("deinit - shutdown\n");
 
     MANAGED_OBJECT_METADATA_SOURCE_DEINIT;
@@ -883,37 +877,34 @@ void managed_obj_deinit(ManagedObjState * state) {
     mps_chain_destroy(state->chain); /* destroy chain before arena */
     mps_arena_destroy(state->arena);     /* last of all */
 
-    free(state->pinned);
-    state->pinned = NULL;
-
     memset(state, 0, sizeof(ManagedObjState));
 }
 
 void managed_obj_print_stats(ManagedObjState * state) {
-  return;
-    size_t size_total;
-    size_t size_free;
-    size_t size_used;
     
     printf("Stats:\n");
+    printf("  Pinned:\n");
+    printf("    capacity:         %zu\n", state->pinned_capacity);
+    printf("    used:             %zu\n", state->pinned_used);
+    printf("    capacity (bytes): %zu\n", sizeof(managed_obj_t)*(state->pinned_capacity));
+    printf("    used (bytes):     %zu\n", sizeof(managed_obj_t)*(state->pinned_used));
     printf("  Memory:\n");
-    printf("    Objects (malloc):\n");
-    printf("      allocated: %zu\n", state->allocated_bytes);
-    printf("      freed:     %zu\n", state->freed_bytes);
+    printf("    Objects (managed_obj_malloc):\n");
+    printf("      allocated (bytes): %zu\n", state->allocated_bytes);
+    printf("      freed (bytes):     %zu\n", state->freed_bytes);
     printf("    Objects (gc):\n");
-    printf("      allocated:           %zu\n", state->allocated_obj_bytes);
-    printf("      freed:               %zu\n", state->freed_obj_bytes);
-    printf("      (aligned) allocated: %zu\n", state->allocated_aligned_obj_bytes);
-    printf("      (aligned) freed:     %zu\n", state->freed_aligned_obj_bytes);
-    // printf("      freed:               %zu\n", state->freed_obj_bytes);
+    printf("      allocated (bytes):           %zu\n", state->allocated_obj_bytes);
+    printf("      freed (bytes):               %zu\n", state->freed_obj_bytes);
+    printf("      (aligned) allocated (bytes): %zu\n", state->allocated_aligned_obj_bytes);
+    printf("      (aligned) freed (bytes):     %zu\n", state->freed_aligned_obj_bytes);
     printf("    Pool Allocation Point:\n");
     printf("      init: %p\n", state->ap->init);
     printf("      alloc: %p\n", state->ap->alloc);
     printf("      limit: %p\n", state->ap->limit);
     printf("    Pool:\n");
-    size_total = mps_pool_total_size(state->pool);
-    size_free = mps_pool_free_size(state->pool);
-    size_used = size_total - size_free;
+    size_t size_total = mps_pool_total_size(state->pool);
+    size_t size_free = mps_pool_free_size(state->pool);
+    size_t size_used = size_total - size_free;
     printf("      Used:  %zu\n", size_used);
     printf("      Free:  %zu\n", size_free);
     printf("      Total: %zu\n", size_total);

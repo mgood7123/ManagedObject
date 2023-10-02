@@ -1155,6 +1155,743 @@ TEST(MPS_weak, 3) {
     managed_obj_deinit(&state); // p1 is actually destroyed here
 }
 
+TEST(MPS_alloc, 1) {
+    ManagedObjState state;
+
+    managed_obj_init_with_user_memory(&state, MANAGED_OBJECT_DEFAULT_ARENA_SIZE, nullptr, 0);
+
+    printf("allocating and pinning 10 thousand objects\n");
+
+    int max = 1000000;
+    unsigned long collect_start = mps_clock();
+    for (int i = 0; i < max; i++) {
+        auto obj = managed_obj_make_empty(&state);
+
+        // unsigned long pin_collect_start = mps_clock();
+        // managed_obj_pin(&state, obj);
+        // unsigned long pin_collect_end = mps_clock();
+
+        // ManagedObjTime pin_collect_duration_time = managed_obj_convert_to_time(pin_collect_end - pin_collect_start);
+        // printf("object %i (pinned in %d seconds, %d milliseconds, %d microseconds)\n\n", i, pin_collect_duration_time.seconds, pin_collect_duration_time.milliseconds, pin_collect_duration_time.microseconds);
+        // managed_obj_make_empty(&state);
+    }
+    unsigned long collect_end = mps_clock();
+
+    ManagedObjTime collect_duration_time = managed_obj_convert_to_time(collect_end - collect_start);
+
+    printf("allocated and pinned 10 thousand objects in %d seconds, %d milliseconds, %d microseconds\n\n", collect_duration_time.seconds, collect_duration_time.milliseconds, collect_duration_time.microseconds);
+    managed_obj_deinit(&state); // p1 is actually destroyed here
+}
+
+#if false
+#include <gc/env/common.h>
+
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+#ifndef __GCENV_H__
+#define __GCENV_H__
+
+// The sample is to be kept simple, so building the sample
+// in tandem with a standalone GC is currently not supported.
+#ifdef BUILD_AS_STANDALONE
+#undef BUILD_AS_STANDALONE
+#endif // BUILD_AS_STANDALONE
+
+#define FEATURE_NATIVEAOT
+
+#if defined(_DEBUG)
+#ifndef _DEBUG_IMPL
+#define _DEBUG_IMPL 1
+#endif
+#define ASSERT(_expr) assert(_expr)
+#else
+#define ASSERT(_expr)
+#endif
+
+#ifndef _ASSERTE
+#define _ASSERTE(_expr) ASSERT(_expr)
+#endif
+
+#include "gcenv.structs.h"
+#include "gcenv.base.h"
+#include "gcenv.os.h"
+#include "gcenv.interlocked.h"
+#include "gcenv.interlocked.inl"
+#include "gcenv.object.h"
+#include "gcenv.sync.h"
+#include "gcenv.ee.h"
+#include "volatile.h"
+
+#ifdef TARGET_UNIX
+#include "gcenv.unix.inl"
+#else
+#include "gcenv.windows.inl"
+#endif
+
+#define MAX_LONGPATH 1024
+
+#ifdef _MSC_VER
+#define SUPPRESS_WARNING_4127   \
+    __pragma(warning(push))     \
+    __pragma(warning(disable:4127)) /* conditional expression is constant*/
+#define POP_WARNING_STATE       \
+    __pragma(warning(pop))
+#else // _MSC_VER
+#define SUPPRESS_WARNING_4127
+#define POP_WARNING_STATE
+#endif // _MSC_VER
+
+#define WHILE_0             \
+    SUPPRESS_WARNING_4127   \
+    while(0)                \
+    POP_WARNING_STATE       \
+
+#define LL_INFO10 4
+
+#define STRESS_LOG_VA(level,msg)                                        do { } WHILE_0
+#define STRESS_LOG0(facility, level, msg)                               do { } WHILE_0
+#define STRESS_LOG1(facility, level, msg, data1)                        do { } WHILE_0
+#define STRESS_LOG2(facility, level, msg, data1, data2)                 do { } WHILE_0
+#define STRESS_LOG3(facility, level, msg, data1, data2, data3)          do { } WHILE_0
+#define STRESS_LOG4(facility, level, msg, data1, data2, data3, data4)   do { } WHILE_0
+#define STRESS_LOG5(facility, level, msg, data1, data2, data3, data4, data5)   do { } WHILE_0
+#define STRESS_LOG6(facility, level, msg, data1, data2, data3, data4, data5, data6)   do { } WHILE_0
+#define STRESS_LOG7(facility, level, msg, data1, data2, data3, data4, data5, data6, data7)   do { } WHILE_0
+#define STRESS_LOG_PLUG_MOVE(plug_start, plug_end, plug_delta)          do { } WHILE_0
+#define STRESS_LOG_ROOT_PROMOTE(root_addr, objPtr, methodTable)         do { } WHILE_0
+#define STRESS_LOG_ROOT_RELOCATE(root_addr, old_value, new_value, methodTable) do { } WHILE_0
+#define STRESS_LOG_GC_START(gcCount, Gen, collectClasses)               do { } WHILE_0
+#define STRESS_LOG_GC_END(gcCount, Gen, collectClasses)                 do { } WHILE_0
+#define STRESS_LOG_OOM_STACK(size)   do { } while(0)
+#define STRESS_LOG_RESERVE_MEM(numChunks) do {} while (0)
+#define STRESS_LOG_GC_STACK
+
+#define LOG(x)
+
+#define SVAL_IMPL_INIT(type, cls, var, init) \
+    type cls::var = init
+
+//
+// Thread
+//
+
+struct alloc_context;
+
+class Thread
+{
+    bool m_fPreemptiveGCDisabled;
+    uintptr_t m_alloc_context[16]; // Reserve enough space to fix allocation context
+
+    friend class ThreadStore;
+    Thread * m_pNext;
+
+public:
+    Thread()
+    {
+    }
+
+    bool PreemptiveGCDisabled()
+    {
+        return m_fPreemptiveGCDisabled;
+    }
+
+    void EnablePreemptiveGC()
+    {
+        m_fPreemptiveGCDisabled = false;
+    }
+
+    void DisablePreemptiveGC()
+    {
+        m_fPreemptiveGCDisabled = true;
+    }
+
+    alloc_context* GetAllocContext()
+    {
+        return (alloc_context *)&m_alloc_context;
+    }
+
+    void SetGCSpecial()
+    {
+    }
+};
+
+Thread * GetThread();
+
+class ThreadStore
+{
+public:
+    static Thread * GetThreadList(Thread * pThread);
+
+    static void AttachCurrentThread();
+};
+
+// -----------------------------------------------------------------------------------------------------------
+// Config file enumulation
+//
+
+class EEConfig
+{
+public:
+    enum HeapVerifyFlags {
+        HEAPVERIFY_NONE = 0,
+        HEAPVERIFY_GC = 1,   // Verify the heap at beginning and end of GC
+        HEAPVERIFY_BARRIERCHECK = 2,   // Verify the brick table
+        HEAPVERIFY_SYNCBLK = 4,   // Verify sync block scanning
+
+                                  // the following options can be used to mitigate some of the overhead introduced
+                                  // by heap verification.  some options might cause heap verifiction to be less
+                                  // effective depending on the scenario.
+
+        HEAPVERIFY_NO_RANGE_CHECKS = 0x10,   // Excludes checking if an OBJECTREF is within the bounds of the managed heap
+        HEAPVERIFY_NO_MEM_FILL = 0x20,   // Excludes filling unused segment portions with fill pattern
+        HEAPVERIFY_POST_GC_ONLY = 0x40,   // Performs heap verification post-GCs only (instead of before and after each GC)
+        HEAPVERIFY_DEEP_ON_COMPACT = 0x80    // Performs deep object verfication only on compacting GCs.
+    };
+
+    enum  GCStressFlags {
+        GCSTRESS_NONE = 0,
+        GCSTRESS_ALLOC = 1,    // GC on all allocs and 'easy' places
+        GCSTRESS_TRANSITION = 2,    // GC on transitions to preemptive GC
+        GCSTRESS_INSTR_JIT = 4,    // GC on every allowable JITed instr
+        GCSTRESS_INSTR_NGEN = 8,    // GC on every allowable NGEN instr
+        GCSTRESS_UNIQUE = 16,   // GC only on a unique stack trace
+    };
+};
+
+#include "etmdummy.h"
+#define ETW_EVENT_ENABLED(e,f) false
+
+class ThreadStressLog
+{
+public:
+    #include "../../inc/gcmsg.inl"
+};
+
+#endif // __GCENV_H__
+
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+#include "common.h"
+
+#include "gcenv.h"
+#include "gc.h"
+
+EEConfig * g_pConfig;
+
+bool CLREventStatic::CreateManualEventNoThrow(bool bInitialState)
+{
+    return false;
+}
+
+bool CLREventStatic::CreateAutoEventNoThrow(bool bInitialState)
+{
+    return false;
+}
+
+bool CLREventStatic::CreateOSManualEventNoThrow(bool bInitialState)
+{
+    return false;
+}
+
+bool CLREventStatic::CreateOSAutoEventNoThrow(bool bInitialState)
+{
+    return false;
+}
+
+void CLREventStatic::CloseEvent()
+{
+}
+
+bool CLREventStatic::IsValid() const
+{
+    return false;
+}
+
+bool CLREventStatic::Set()
+{
+    return false;
+}
+
+bool CLREventStatic::Reset()
+{
+    return false;
+}
+
+uint32_t CLREventStatic::Wait(uint32_t dwMilliseconds, bool bAlertable)
+{
+    return 0;
+}
+
+thread_local Thread * pCurrentThread;
+
+Thread * GetThread()
+{
+    return pCurrentThread;
+}
+
+Thread * g_pThreadList = NULL;
+
+Thread * ThreadStore::GetThreadList(Thread * pThread)
+{
+    if (pThread == NULL)
+        return g_pThreadList;
+
+    return pThread->m_pNext;
+}
+
+void ThreadStore::AttachCurrentThread()
+{
+    // TODO: Locks
+
+    Thread * pThread = new Thread();
+    pThread->GetAllocContext()->init();
+    pCurrentThread = pThread;
+
+    pThread->m_pNext = g_pThreadList;
+    g_pThreadList = pThread;
+}
+
+void GCToEEInterface::SuspendEE(SUSPEND_REASON reason)
+{
+    g_theGCHeap->SetGCInProgress(true);
+
+    // TODO: Implement
+}
+
+void GCToEEInterface::RestartEE(bool bFinishedGC)
+{
+    // TODO: Implement
+
+    g_theGCHeap->SetGCInProgress(false);
+}
+
+void GCToEEInterface::GcScanRoots(promote_func* fn,  int condemned, int max_gen, ScanContext* sc)
+{
+    // TODO: Implement - Scan stack roots on given thread
+}
+
+void GCToEEInterface::GcStartWork(int condemned, int max_gen)
+{
+}
+
+void GCToEEInterface::BeforeGcScanRoots(int condemned, bool is_bgc, bool is_concurrent)
+{
+}
+
+void GCToEEInterface::AfterGcScanRoots(int condemned, int max_gen, ScanContext* sc)
+{
+}
+
+void GCToEEInterface::GcDone(int condemned)
+{
+}
+
+bool GCToEEInterface::RefCountedHandleCallbacks(Object * pObject)
+{
+    return false;
+}
+
+bool GCToEEInterface::IsPreemptiveGCDisabled()
+{
+    Thread* pThread = ::GetThread();
+    return pThread->PreemptiveGCDisabled();
+}
+
+bool GCToEEInterface::EnablePreemptiveGC()
+{
+    Thread* pThread = ::GetThread();
+    if (pThread && pThread->PreemptiveGCDisabled())
+    {
+        pThread->EnablePreemptiveGC();
+        return true;
+    }
+
+    return false;
+}
+
+void GCToEEInterface::DisablePreemptiveGC()
+{
+    Thread* pThread = ::GetThread();
+    pThread->DisablePreemptiveGC();
+}
+
+Thread* GCToEEInterface::GetThread()
+{
+    return ::GetThread();
+}
+
+gc_alloc_context * GCToEEInterface::GetAllocContext()
+{
+    Thread* pThread = ::GetThread();
+    return pThread->GetAllocContext();
+}
+
+void GCToEEInterface::GcEnumAllocContexts (enum_alloc_context_func* fn, void* param)
+{
+    Thread * pThread = NULL;
+    while ((pThread = ThreadStore::GetThreadList(pThread)) != NULL)
+    {
+        fn(pThread->GetAllocContext(), param);
+    }
+}
+
+uint8_t* GCToEEInterface::GetLoaderAllocatorObjectForGC(Object* pObject)
+{
+    return NULL;
+}
+
+void GCToEEInterface::SyncBlockCacheWeakPtrScan(HANDLESCANPROC /*scanProc*/, uintptr_t /*lp1*/, uintptr_t /*lp2*/)
+{
+}
+
+void GCToEEInterface::SyncBlockCacheDemote(int /*max_gen*/)
+{
+}
+
+void GCToEEInterface::SyncBlockCachePromotionsGranted(int /*max_gen*/)
+{
+}
+
+void GCToEEInterface::DiagGCStart(int gen, bool isInduced)
+{
+}
+
+void GCToEEInterface::DiagUpdateGenerationBounds()
+{
+}
+
+void GCToEEInterface::DiagGCEnd(size_t index, int gen, int reason, bool fConcurrent)
+{
+}
+
+void GCToEEInterface::DiagWalkFReachableObjects(void* gcContext)
+{
+}
+
+void GCToEEInterface::DiagWalkSurvivors(void* gcContext, bool fCompacting)
+{
+}
+
+void GCToEEInterface::DiagWalkUOHSurvivors(void* gcContext, int gen)
+{
+}
+
+void GCToEEInterface::DiagWalkBGCSurvivors(void* gcContext)
+{
+}
+
+void GCToEEInterface::StompWriteBarrier(WriteBarrierParameters* args)
+{
+}
+
+void GCToEEInterface::EnableFinalization(bool gcHasWorkForFinalizerThread)
+{
+    // Signal to finalizer thread that there are objects to finalize
+    // TODO: Implement for finalization
+}
+
+void GCToEEInterface::HandleFatalError(unsigned int exitCode)
+{
+    abort();
+}
+
+bool GCToEEInterface::EagerFinalized(Object* obj)
+{
+    // The sample does not finalize anything eagerly.
+    return false;
+}
+
+bool GCToEEInterface::GetBooleanConfigValue(const char* privateKey, const char* publicKey, bool* value)
+{
+    return false;
+}
+
+bool GCToEEInterface::GetIntConfigValue(const char* privateKey, const char* publicKey, int64_t* value)
+{
+    return false;
+}
+
+bool GCToEEInterface::GetStringConfigValue(const char* privateKey, const char* publicKey, const char** value)
+{
+    return false;
+}
+
+void GCToEEInterface::FreeStringConfigValue(const char *value)
+{
+}
+
+bool GCToEEInterface::IsGCThread()
+{
+    return false;
+}
+
+bool GCToEEInterface::WasCurrentThreadCreatedByGC()
+{
+    return false;
+}
+
+static MethodTable freeObjectMT;
+
+MethodTable* GCToEEInterface::GetFreeObjectMethodTable()
+{
+    //
+    // Initialize free object methodtable. The GC uses a special array-like methodtable as placeholder
+    // for collected free space.
+    //
+    freeObjectMT.InitializeFreeObject();
+    return &freeObjectMT;
+}
+
+bool GCToEEInterface::CreateThread(void (*threadStart)(void*), void* arg, bool is_suspendable, const char* name)
+{
+    return false;
+}
+
+void GCToEEInterface::WalkAsyncPinnedForPromotion(Object* object, ScanContext* sc, promote_func* callback)
+{
+}
+
+void GCToEEInterface::WalkAsyncPinned(Object* object, void* context, void (*callback)(Object*, Object*, void*))
+{
+}
+
+uint32_t GCToEEInterface::GetTotalNumSizedRefHandles()
+{
+    return -1;
+}
+
+inline bool GCToEEInterface::AnalyzeSurvivorsRequested(int condemnedGeneration)
+{
+    return false;
+}
+
+inline void GCToEEInterface::AnalyzeSurvivorsFinished(size_t gcIndex, int condemnedGeneration, uint64_t promoted_bytes, void (*reportGenerationBounds)())
+{
+}
+
+void GCToEEInterface::VerifySyncTableEntry()
+{
+}
+
+void GCToEEInterface::UpdateGCEventStatus(int currentPublicLevel, int currentPublicKeywords, int currentPrivateLevel, int currentPrivateKeywords)
+{
+}
+
+uint32_t GCToEEInterface::GetCurrentProcessCpuCount()
+{
+    return GCToOSInterface::GetTotalProcessorCount();
+}
+
+void GCToEEInterface::DiagAddNewRegion(int generation, uint8_t* rangeStart, uint8_t* rangeEnd, uint8_t* rangeEndReserved)
+{
+}
+
+void GCToEEInterface::LogErrorToHost(const char *message)
+{
+}
+
+#include <gc/gc.h>
+#include <gc/objecthandle.h>
+#include <gc/gcdesc.h>
+
+#ifdef TARGET_X86
+#define LOCALGC_CALLCONV __cdecl
+#else
+#define LOCALGC_CALLCONV
+#endif
+
+//
+// The fast paths for object allocation and write barriers is performance critical. They are often
+// hand written in assembly code, etc.
+//
+Object * AllocateObject(MethodTable * pMT)
+{
+    alloc_context * acontext = GCToEEInterface::GetThread()->GetAllocContext();
+    Object * pObject;
+
+    size_t size = pMT->GetBaseSize();
+
+    uint8_t* result = acontext->alloc_ptr;
+    uint8_t* advance = result + size;
+    if (advance <= acontext->alloc_limit)
+    {
+        acontext->alloc_ptr = advance;
+        pObject = (Object *)result;
+    }
+    else
+    {
+        pObject = g_theGCHeap->Alloc(acontext, size, 0);
+        if (pObject == NULL)
+            return NULL;
+    }
+
+    pObject->RawSetMethodTable(pMT);
+
+    return pObject;
+}
+
+#if defined(HOST_64BIT)
+// Card byte shift is different on 64bit.
+#define card_byte_shift     11
+#else
+#define card_byte_shift     10
+#endif
+
+#define card_byte(addr) (((size_t)(addr)) >> card_byte_shift)
+
+inline void ErectWriteBarrier(Object ** dst, Object * ref)
+{
+    // if the dst is outside of the heap (unboxed value classes) then we
+    //      simply exit
+    if (((uint8_t*)dst < g_gc_lowest_address) || ((uint8_t*)dst >= g_gc_highest_address))
+        return;
+
+    // volatile is used here to prevent fetch of g_card_table from being reordered
+    // with g_lowest/highest_address check above. See comments in StompWriteBarrier
+    uint8_t* pCardByte = (uint8_t *)*(volatile uint8_t **)(&g_gc_card_table) + card_byte((uint8_t *)dst);
+    if(*pCardByte != 0xFF)
+        *pCardByte = 0xFF;
+}
+
+void WriteBarrier(Object ** dst, Object * ref)
+{
+    *dst = ref;
+    ErectWriteBarrier(dst, ref);
+}
+
+extern "C" HRESULT LOCALGC_CALLCONV GC_Initialize(IGCToCLR* clrToGC, IGCHeap** gcHeap, IGCHandleManager** gcHandleManager, GcDacVars* gcDacVars);
+
+int m() {
+    //
+    // Initialize system info
+    //
+    if (!GCToOSInterface::Initialize())
+    {
+        return -1;
+    }
+
+    //
+    // Initialize GC heap
+    //
+    GcDacVars dacVars;
+    IGCHeap *pGCHeap;
+    IGCHandleManager *pGCHandleManager;
+    if (GC_Initialize(nullptr, &pGCHeap, &pGCHandleManager, &dacVars) != S_OK)
+    {
+        return -1;
+    }
+
+    if (FAILED(pGCHeap->Initialize()))
+        return -1;
+
+    //
+    // Initialize handle manager
+    //
+    if (!pGCHandleManager->Initialize())
+        return -1;
+
+    //
+    // Initialize current thread
+    //
+    ThreadStore::AttachCurrentThread();
+
+    //
+    // Create a Methodtable with GCDesc
+    //
+
+    class My : Object {
+    public:
+        Object * m_pOther1;
+        int dummy_inbetween;
+        Object * m_pOther2;
+    };
+
+    static struct My_MethodTable
+    {
+        // GCDesc
+        CGCDescSeries m_series[2];
+        size_t m_numSeries;
+
+        // The actual methodtable
+        MethodTable m_MT;
+    }
+    My_MethodTable;
+
+    // 'My' contains the MethodTable*
+    uint32_t baseSize = sizeof(My);
+    // GC expects the size of ObjHeader (extra void*) to be included in the size.
+    baseSize = baseSize + sizeof(ObjHeader);
+    // Add padding as necessary. GC requires the object size to be at least MIN_OBJECT_SIZE.
+    My_MethodTable.m_MT.m_baseSize = max(baseSize, MIN_OBJECT_SIZE);
+
+    My_MethodTable.m_MT.m_componentSize = 0;    // Array component size
+    My_MethodTable.m_MT.m_flags = MTFlag_ContainsPointers;
+
+    My_MethodTable.m_numSeries = 2;
+
+    // The GC walks the series backwards. It expects the offsets to be sorted in descending order.
+    My_MethodTable.m_series[0].SetSeriesOffset(offsetof(My, m_pOther2));
+    My_MethodTable.m_series[0].SetSeriesCount(1);
+    My_MethodTable.m_series[0].seriessize -= My_MethodTable.m_MT.m_baseSize;
+
+    My_MethodTable.m_series[1].SetSeriesOffset(offsetof(My, m_pOther1));
+    My_MethodTable.m_series[1].SetSeriesCount(1);
+    My_MethodTable.m_series[1].seriessize -= My_MethodTable.m_MT.m_baseSize;
+
+    MethodTable * pMyMethodTable = &My_MethodTable.m_MT;
+
+    // Allocate instance of MyObject
+    Object * pObj = AllocateObject(pMyMethodTable);
+    if (pObj == NULL)
+        return -1;
+
+    // Create strong handle and store the object into it
+    OBJECTHANDLE oh = HndCreateHandle(g_HandleTableMap.pBuckets[0]->pTable[GetCurrentThreadHomeHeapNumber()], HNDTYPE_DEFAULT, pObj);
+    if (oh == NULL)
+        return -1;
+
+    for (int i = 0; i < 1000000; i++)
+    {
+        Object * pBefore = ((My *)HndFetchHandle(oh))->m_pOther1;
+
+        // Allocate more instances of the same object
+        Object * p = AllocateObject(pMyMethodTable);
+        if (p == NULL)
+            return -1;
+
+        Object * pAfter = ((My *)HndFetchHandle(oh))->m_pOther1;
+
+        // Uncomment this assert to see how GC triggered inside AllocateObject moved objects around
+        // assert(pBefore == pAfter);
+
+        // Store the newly allocated object into a field using WriteBarrier
+        WriteBarrier(&(((My *)HndFetchHandle(oh))->m_pOther1), p);
+    }
+
+    // Create weak handle that points to our object
+    OBJECTHANDLE ohWeak = HndCreateHandle(g_HandleTableMap.pBuckets[0]->pTable[GetCurrentThreadHomeHeapNumber()], HNDTYPE_WEAK_DEFAULT, HndFetchHandle(oh));
+    if (ohWeak == NULL)
+        return -1;
+
+    // Destroy the strong handle so that nothing will be keeping out object alive
+    HndDestroyHandle(HndGetHandleTable(oh), HNDTYPE_DEFAULT, oh);
+
+    // Explicitly trigger full GC
+    pGCHeap->GarbageCollect();
+
+    // Verify that the weak handle got cleared by the GC
+    assert(HndFetchHandle(ohWeak) == NULL);
+
+    printf("Done\n");
+
+    return 0;
+}
+
+TEST(dotnet_gc, GC_1) {
+    m();
+}
+#endif
 /*
 TEST(MPS_finalize, 3) {
     ManagedObjState state;

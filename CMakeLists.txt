@@ -40,11 +40,16 @@ testBuilder_add_compile_option(gc_boehm "SHELL:-DUSE_SEGV_SIGACT")
 testBuilder_build_static_library(gc_stub_boehm)
 target_include_directories(gc_stub_boehm PRIVATE stub_bdwgc/include)
 
+
 testBuilder_add_include(gc_mps mps_master/code)
 testBuilder_add_include(gc_mps include)
 testBuilder_add_source(gc_mps mps_master/code/mps.c)
 testBuilder_add_source(gc_mps src/managed_object_obj.c)
 testBuilder_add_library(gc_mps gc_stub_boehm)
+
+#add_subdirectory(dotnet_gc)
+#testBuilder_add_library(gc_mps dotnet_gc)
+
 testBuilder_build_static_library(gc_mps)
 # CONFIG_VAR_COOL
 # CONFIG_VAR_HOT
@@ -54,11 +59,11 @@ target_compile_options(gc_mps PRIVATE "SHELL:-DCONFIG_VAR_COOL")
 target_include_directories(gc_mps PRIVATE stub_bdwgc/include)
 target_compile_options(gc_stub_boehm PRIVATE "SHELL:-DSTACK_GROWS_DOWN")
 
-testBuilder_add_include(managed_object include)
-testBuilder_add_source(managed_object src/managed_object_heap.cpp)
-testBuilder_add_source(managed_object src/managed_object.cpp)
-testBuilder_add_library(managed_object gc_mps)
-testBuilder_build_static_library(managed_object)
+#testBuilder_add_include(managed_object include)
+#testBuilder_add_source(managed_object src/managed_object_heap.cpp)
+#testBuilder_add_source(managed_object src/managed_object.cpp)
+#testBuilder_add_library(managed_object gc_mps)
+#testBuilder_build_static_library(managed_object)
 
 testBuilder_add_include(managed_object_debug include)
 testBuilder_add_source(managed_object_debug src/managed_object_heap.cpp)

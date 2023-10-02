@@ -370,10 +370,6 @@ managed_obj_t managed_obj_metadata_make_string(ManagedObjState * state, size_t l
   state->allocated_obj_bytes += sizeof(managed_obj_metadata_string_s); \
   state->allocated_aligned_obj_bytes += size; \
 \
-  printf("METADATA: reserved and comitted string object %p (with size %zu, aligned size %zu)\n", obj, sizeof(managed_obj_metadata_string_s), size); \
-\
-  managed_obj_print_stats(state); \
-\
   mps_finalize(state->arena, (mps_addr_t*)&obj); \
 \
   return obj; \
@@ -401,10 +397,6 @@ managed_obj_t managed_obj_metadata_make_buckets(ManagedObjState * state, size_t 
   } \
   state->allocated_obj_bytes += sizeof(managed_obj_metadata_buckets_s); \
   state->allocated_aligned_obj_bytes += size; \
-\
-  printf("METADATA: reserved and comitted bucket object %p (with size %zu, aligned size %zu)\n", obj, sizeof(managed_obj_metadata_buckets_s), size); \
-\
-  managed_obj_print_stats(state); \
 \
   mps_finalize(state->arena, (mps_addr_t*)&obj); \
 \
@@ -437,10 +429,6 @@ managed_obj_t managed_obj_metadata_make_table(ManagedObjState * state, size_t le
   } \
   state->allocated_obj_bytes += sizeof(managed_obj_metadata_hashtable_s); \
   state->allocated_aligned_obj_bytes += size; \
-\
-  printf("METADATA: reserved and comitted table object %p (with size %zu, aligned size %zu)\n", obj, sizeof(managed_obj_metadata_hashtable_s), size); \
-\
-  managed_obj_print_stats(state); \
 \
   mps_finalize(state->arena, (mps_addr_t*)&obj); \
 \
