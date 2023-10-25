@@ -50,6 +50,7 @@ typedef struct managed_obj_global_metadata_ht_keys_s {
 
 typedef struct managed_obj_metadata_buckets_s {
   managed_obj_type_t type;                           /* MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE_BUCKET */
+  mps_bool_t pinned;
   struct managed_obj_metadata_buckets_s *dependent;  /* the dependent object */
   size_t length;                                     /* number of buckets (tagged) */
   size_t used;                                       /* number of buckets in use (tagged) */
@@ -66,6 +67,7 @@ typedef int (*managed_obj_metadata_cmp_t)(managed_obj_t obj1, managed_obj_t obj2
  * detect this. See topic/location. */
 typedef struct managed_obj_metadata_hashtable_s {
   managed_obj_type_t type;                          /* MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE */
+  mps_bool_t pinned;
   managed_obj_metadata_hash_t hash;                 /* hash function */
   managed_obj_metadata_cmp_t cmp;                   /* comparison function */
   mps_ld_s ld;                                      /* location dependency */
@@ -75,6 +77,7 @@ typedef struct managed_obj_metadata_hashtable_s {
 
 typedef struct managed_obj_metadata_string_s {
   managed_obj_type_t type;      /* MANAGED_OBJECT_TYPE_METADATA_STRING */
+  mps_bool_t pinned;
   size_t length;                /* number of chars in string */
   char string[1];               /* string, NUL terminated */
 } managed_obj_metadata_string_s;
@@ -106,6 +109,7 @@ enum {
 
 typedef struct managed_obj_metadata_s {
   managed_obj_type_t type;                                    /* MANAGED_OBJECT_TYPE_METADATA */
+  mps_bool_t pinned;
   void * table;
 } managed_obj_metadata_s;
 
@@ -113,11 +117,13 @@ typedef struct managed_obj_metadata_s {
 
 typedef struct managed_obj_metadata_field_s {
   managed_obj_type_t type;                                    /* MANAGED_OBJECT_TYPE_METADATA_FIELD_POINTER */
+  mps_bool_t pinned;
   managed_obj_type_t field_return_type;                       /* field return type */
 } managed_obj_metadata_field_s;
 
 typedef struct managed_obj_metadata_method_s {
   managed_obj_type_t type;                                    /* MANAGED_OBJECT_TYPE_METADATA_METHOD_POINTER */
+  mps_bool_t pinned;
   managed_obj_type_t method_return_type;                      /* method return type */
   size_t parameter_count;                                     /* parameter count */
   managed_obj_type_t parameters[1];                           /* method parameters */
@@ -203,34 +209,27 @@ typedef struct managed_obj_metadata_method_s {
 
 #define MANAGED_OBJECT_METADATA_SCAN \
       case MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE_BUCKET: { \
-        printf("scan bucket %p\n", base); \
         size_t i, length = MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.length); \
         if(obj->metadata_bucket.dependent != NULL) { \
-            printf("scan bucket dependent %p\n", base); \
             MANAGED_OBJECT_FIX(obj->metadata_bucket.dependent); \
             AVER(obj->metadata_bucket.dependent->length == obj->metadata_bucket.length); \
         } \
         for (i = 0; i < length; ++i) { \
             mps_addr_t p = obj->metadata_bucket.bucket[i]; \
-            printf("scan obj->metadata_bucket.bucket[%zu] with value of %p\n", i, p); \
             if (MPS_FIX1(ss, p)) { \
               mps_res_t res = MPS_FIX2(ss, &p); \
               if (res != MPS_RES_OK) return res; \
               if (p == NULL) { \
-                printf("scan obj->metadata_bucket.bucket[%zu] became %p\n", i, p); \
                 /* key/value was splatted: splat value/key too */ \
                 p = managed_obj_global_metadata_ids.deleted; \
-                printf("scan obj->metadata_bucket.bucket[%zu] became %p [deleted]\n", i, p); \
                 obj->metadata_bucket.deleted = MANAGED_OBJECT_METADATA_TAG_COUNT(MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.deleted) + 1); \
                 if (obj->metadata_bucket.dependent != NULL) { \
                     obj->metadata_bucket.dependent->bucket[i] = p; \
-                    printf("scan obj->metadata_bucket.dependent->bucket[%zu] became %p [deleted]\n", i, p); \
                     obj->metadata_bucket.dependent->deleted \
                         = MANAGED_OBJECT_METADATA_TAG_COUNT(MANAGED_OBJECT_METADATA_UNTAG_COUNT(obj->metadata_bucket.dependent->deleted) + 1); \
                 } \
               } \
               if (obj->metadata_bucket.bucket[i] != p) { \
-                printf("scan obj->metadata_bucket.bucket[%zu] assigned value of %p\n", i, p); \
                 obj->metadata_bucket.bucket[i] = p; \
               } \
             } \
@@ -240,14 +239,12 @@ typedef struct managed_obj_metadata_method_s {
         break; \
       } \
       case MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE: { \
-        printf("scan hash %p\n", base); \
         size_t i, length; \
         MANAGED_OBJECT_FIX(obj->metadata_hashtable.keys); \
         MANAGED_OBJECT_FIX(obj->metadata_hashtable.values); \
         base = (char *)base + MANAGED_OBJECT_ALIGN_OBJ(sizeof(managed_obj_metadata_hashtable_s)); \
         break; } \
       case MANAGED_OBJECT_TYPE_METADATA_STRING: \
-        printf("scan string %p\n", base); \
         base = (char *)base + \
           MANAGED_OBJECT_ALIGN_OBJ(offsetof(managed_obj_metadata_string_s, string) + obj->metadata_string.length + 1); \
         break; \
@@ -360,6 +357,7 @@ managed_obj_t managed_obj_metadata_make_string(ManagedObjState * state, size_t l
     mps_res_t res = mps_reserve((mps_addr_t*)&obj, state->ap, size); \
     if (res != MPS_RES_OK) managed_obj_error("out of memory in make_string"); \
     obj->metadata_string.type = MANAGED_OBJECT_TYPE_METADATA_STRING; \
+    obj->metadata_string.pinned = FALSE; \
     obj->metadata_string.length = length; \
     if (string) memcpy(obj->metadata_string.string, string, length+1); \
     else managed_obj_volatile_memset(obj->metadata_string.string, 0, length+1); \
@@ -384,6 +382,7 @@ managed_obj_t managed_obj_metadata_make_buckets(ManagedObjState * state, size_t 
     size_t i; \
     if (res != MPS_RES_OK) managed_obj_error("out of memory in make_buckets"); \
     obj->metadata_bucket.type = MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE_BUCKET; \
+    obj->metadata_bucket.pinned = FALSE; \
     obj->metadata_bucket.dependent = NULL; \
     obj->metadata_bucket.length = MANAGED_OBJECT_METADATA_TAG_COUNT(length); \
     obj->metadata_bucket.used = MANAGED_OBJECT_METADATA_TAG_COUNT(0); \
@@ -411,19 +410,20 @@ managed_obj_t managed_obj_metadata_make_table(ManagedObjState * state, size_t le
     mps_res_t res = mps_reserve((mps_addr_t*)&obj, state->ap, size); \
     if (res != MPS_RES_OK) managed_obj_error("out of memory in make_table"); \
     obj->metadata_hashtable.type = MANAGED_OBJECT_TYPE_METADATA_HASH_TABLE; \
+    obj->metadata_hashtable.pinned = FALSE; \
     obj->metadata_hashtable.keys = obj->metadata_hashtable.values = NULL; \
     if (mps_commit(state->ap, obj, size)) { \
-        obj->metadata_hashtable.hash = hashf; \
-        obj->metadata_hashtable.cmp = cmpf; \
-        /* round up to next power of 2 */ \
-        for(l = 1; l < length; l *= 2); \
-        obj->metadata_hashtable.key_ap = weak_key ? state->weak_buckets_ap : state->strong_buckets_ap; \
-        obj->metadata_hashtable.value_ap = weak_value ? state->weak_buckets_ap : state->strong_buckets_ap; \
-        obj->metadata_hashtable.keys = (managed_obj_metadata_buckets_t)managed_obj_metadata_make_buckets(state, l, obj->metadata_hashtable.key_ap); \
-        obj->metadata_hashtable.values = (managed_obj_metadata_buckets_t)managed_obj_metadata_make_buckets(state, l, obj->metadata_hashtable.value_ap); \
-        obj->metadata_hashtable.keys->dependent = obj->metadata_hashtable.values; \
-        obj->metadata_hashtable.values->dependent = obj->metadata_hashtable.keys; \
-        mps_ld_reset(&obj->metadata_hashtable.ld, state->arena); \
+      obj->metadata_hashtable.hash = hashf; \
+      obj->metadata_hashtable.cmp = cmpf; \
+      /* round up to next power of 2 */ \
+      for(l = 1; l < length; l *= 2); \
+      obj->metadata_hashtable.key_ap = weak_key ? state->weak_buckets_ap : state->strong_buckets_ap; \
+      obj->metadata_hashtable.value_ap = weak_value ? state->weak_buckets_ap : state->strong_buckets_ap; \
+      obj->metadata_hashtable.keys = (managed_obj_metadata_buckets_t)managed_obj_metadata_make_buckets(state, l, obj->metadata_hashtable.key_ap); \
+      obj->metadata_hashtable.values = (managed_obj_metadata_buckets_t)managed_obj_metadata_make_buckets(state, l, obj->metadata_hashtable.value_ap); \
+      obj->metadata_hashtable.keys->dependent = obj->metadata_hashtable.values; \
+      obj->metadata_hashtable.values->dependent = obj->metadata_hashtable.keys; \
+      mps_ld_reset(&obj->metadata_hashtable.ld, state->arena); \
       break; \
     } \
   } \

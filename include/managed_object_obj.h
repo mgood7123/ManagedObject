@@ -75,12 +75,12 @@ struct ManagedObjState {
     mps_thr_t thread;
     mps_root_t thread_stack_root;
 
-    // object pinning support
-    // an array is used to keep track of pinned objects
-    managed_obj_t* pinned;
-    size_t pinned_used;
-    size_t pinned_capacity;
-    mps_root_t pinned_root;
+    // depreciated - uses extra memory, as opposed setting an object flag
+    //
+    // managed_obj_t* pushed_pinned;
+    // size_t pushed_pinned_used;
+    // size_t pushed_pinned_capacity;
+    // mps_root_t pushed_pinned_root;
 
     MANAGED_OBJECT_METADATA_STATE
     
@@ -90,6 +90,7 @@ struct ManagedObjState {
     size_t allocated_aligned_obj_bytes;
     size_t freed_obj_bytes;
     size_t freed_aligned_obj_bytes;
+    size_t pinned_used;
 };
 
 
@@ -127,10 +128,12 @@ enum {
 
 typedef struct managed_obj_empty_s {
   managed_obj_type_t type;      /* MANAGED_OBJECT_TYPE_EMPTY */
+  mps_bool_t pinned;
 } managed_obj_empty_s;
 
 typedef struct managed_obj_type_s {
   managed_obj_type_t type;
+  mps_bool_t pinned;
 } managed_obj_type_s;
 
 typedef mps_res_t (*managed_obj_scanned_pointer_scan_fn_t)(mps_ss_t ss, void*);
@@ -138,6 +141,7 @@ typedef void (*managed_obj_finalization_callback_t)(ManagedObjState * state, voi
 
 typedef struct managed_obj_scanned_pointer_s {
   managed_obj_type_t type;                                    /* MANAGED_OBJECT_TYPE_SCANNED_POINTER */
+  mps_bool_t pinned;
   void* pointer;                                              /* the pointer */
   managed_obj_scanned_pointer_scan_fn_t scanner;              /* tell the scanner how to scan our pointer */
   managed_obj_finalization_callback_t finalization_callback;  /* the finalization callback */
@@ -167,21 +171,25 @@ typedef struct managed_obj_scanned_pointer_s {
 
 typedef struct managed_obj_fwd2_s {
   managed_obj_type_t type;                  /* MANAGED_OBJECT_TYPE_FWD2 */
+  mps_bool_t pinned;
   managed_obj_t fwd;                    /* forwarded object */
 } managed_obj_fwd2_s;
 
 typedef struct managed_obj_fwd_s {
   managed_obj_type_t type;                  /* MANAGED_OBJECT_TYPE_FWD */
+  mps_bool_t pinned;
   managed_obj_t fwd;                    /* forwarded object */
   size_t size;                  /* total size of this object */
 } managed_obj_fwd_s;
 
 typedef struct managed_obj_pad1_s {
   managed_obj_type_t type;                  /* MANAGED_OBJECT_TYPE_PAD1 */
+  mps_bool_t pinned;
 } managed_obj_pad1_s;
 
 typedef struct managed_obj_pad_s {
   managed_obj_type_t type;                  /* MANAGED_OBJECT_TYPE_PAD */
+  mps_bool_t pinned;
   size_t size;                  /* total size of this object */
 } managed_obj_pad_s;
 
@@ -234,7 +242,6 @@ extern "C" {
 #define MANAGED_OBJECT_FIX(ref) \
   do { \
     mps_addr_t _addr = (ref); /* copy to local to avoid type pun */ \
-    printf("fixing address %p\n", _addr); \
     mps_res_t res = MPS_FIX12(ss, &_addr); \
     if (res != MPS_RES_OK) return res; \
     (ref) = _addr; \
@@ -280,8 +287,14 @@ managed_obj_t managed_obj_make_with_finalizer(ManagedObjState * state, void * po
 managed_obj_t managed_obj_make_scanned(ManagedObjState * state, void * pointer, managed_obj_scanned_pointer_scan_fn_t scan_fn);
 managed_obj_t managed_obj_make_scanned_with_finalizer(ManagedObjState * state, void * pointer, managed_obj_scanned_pointer_scan_fn_t scan_fn, managed_obj_finalization_callback_t finalization_callback);
 managed_obj_t managed_obj_make_empty(ManagedObjState * state);
-void managed_obj_pin(ManagedObjState * state, managed_obj_t);
-void managed_obj_unpin(ManagedObjState * state, managed_obj_t);
+void managed_obj_pin(ManagedObjState * state, managed_obj_t obj);
+void managed_obj_unpin(ManagedObjState * state, managed_obj_t obj);
+
+// depreciated - uses extra memory, as opposed setting an object flag
+//
+// void managed_obj_push_pin(ManagedObjState * state, managed_obj_t obj);
+// void managed_obj_pop_pin(ManagedObjState * state);
+
 void managed_obj_collect(ManagedObjState * state);
 void managed_obj_deinit(ManagedObjState * state);
 

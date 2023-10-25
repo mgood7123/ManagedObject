@@ -308,7 +308,7 @@ class BoxedVar : public ManagedObject {
         } else {
             // assigns the 'ptr' regardless of what T is
             // additionally, if T is derived from ManagedObject then it re-root's the allocation to our ManagedObject
-            // returns the given ptr, as the current ptr reference may been invalidated
+            // returns the given ptr, as the current ptr reference may become invalidated
             return reroot(id, new T());
         }
     }

@@ -4,22 +4,13 @@
 [submodule "stub_bdwgc"]
 	path = stub_bdwgc
 	url = https://github.com/mgood7123/stub_bdwgc
-[submodule "asmjit"]
-	path = asmjit
-	url = https://github.com/asmjit/asmjit
 [submodule "mps_gc"]
 	path = mps_gc
 	url = https://github.com/mgood7123/mps
 	branch = main
-[submodule "libdwarf"]
-	path = libdwarf
-	url = https://github.com/davea42/libdwarf-code
 [submodule "STC"]
 	path = STC
 	url = https://github.com/stclib/STC
-[submodule "TempFile"]
-	path = TempFile
-	url = https://github.com/mgood7123/TempFile
 [submodule "llvm_mcjit"]
 	path = llvm_mcjit
 	url = https://github.com/mgood7123/llvm_16

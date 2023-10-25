@@ -13,6 +13,8 @@ if(NOT COMMAND testBuilder_build)
     testBuilder_set_current_working_directory_to_default_binary_directory()
 endif()
 
+add_subdirectory(llvm_mcjit)
+
 testBuilder_add_source(gc_stub_boehm stub_bdwgc/alloc.c)
 testBuilder_add_source(gc_stub_boehm stub_bdwgc/reclaim.c)
 testBuilder_add_source(gc_stub_boehm stub_bdwgc/allchblk.c)
@@ -37,24 +39,22 @@ testBuilder_add_source(gc_stub_boehm stub_bdwgc/fnlz_mlc.c)
 testBuilder_add_source(gc_stub_boehm stub_bdwgc/backgraph.c)
 testBuilder_add_compile_option(gc_stub_boehm "SHELL:-DUSE_SEGV_SIGACT")
 testBuilder_add_compile_option(gc_boehm "SHELL:-DUSE_SEGV_SIGACT")
-testBuilder_build_static_library(gc_stub_boehm)
+testBuilder_build_shared_library(gc_stub_boehm)
 target_include_directories(gc_stub_boehm PRIVATE stub_bdwgc/include)
 
-
-testBuilder_add_include(gc_mps mps_master/code)
+testBuilder_add_include(gc_mps mps_gc/code)
 testBuilder_add_include(gc_mps include)
-testBuilder_add_source(gc_mps mps_master/code/mps.c)
+testBuilder_add_source(gc_mps mps_gc/code/mps.c)
+testBuilder_add_source(gc_mps src/managed_object_hashmap.c)
 testBuilder_add_source(gc_mps src/managed_object_obj.c)
 testBuilder_add_library(gc_mps gc_stub_boehm)
+testBuilder_add_library(gc_mps llvm_orcjit)
 
-#add_subdirectory(dotnet_gc)
-#testBuilder_add_library(gc_mps dotnet_gc)
-
-testBuilder_build_static_library(gc_mps)
+testBuilder_build_shared_library(gc_mps)
 # CONFIG_VAR_COOL
 # CONFIG_VAR_HOT
 # CONFIG_VAR_RASH
-target_compile_options(gc_mps PRIVATE "SHELL:-DCONFIG_VAR_COOL")
+target_compile_options(gc_mps PRIVATE "SHELL:-DCONFIG_VAR_RASH")
 
 target_include_directories(gc_mps PRIVATE stub_bdwgc/include)
 target_compile_options(gc_stub_boehm PRIVATE "SHELL:-DSTACK_GROWS_DOWN")
@@ -63,14 +63,14 @@ target_compile_options(gc_stub_boehm PRIVATE "SHELL:-DSTACK_GROWS_DOWN")
 #testBuilder_add_source(managed_object src/managed_object_heap.cpp)
 #testBuilder_add_source(managed_object src/managed_object.cpp)
 #testBuilder_add_library(managed_object gc_mps)
-#testBuilder_build_static_library(managed_object)
+#testBuilder_build_shared_library(managed_object)
 
 testBuilder_add_include(managed_object_debug include)
 testBuilder_add_source(managed_object_debug src/managed_object_heap.cpp)
 testBuilder_add_source(managed_object_debug src/managed_object.cpp)
 testBuilder_add_compile_option(managed_object_debug "SHELL:-D MANAGED_OBJECT_HEAP_DEBUG=1")
 testBuilder_add_library(managed_object_debug gc_mps)
-testBuilder_build_static_library(managed_object_debug)
+testBuilder_build_shared_library(managed_object_debug)
 
 if (NOT TARGET gtest AND NOT TARGET gtest_main)
     # Prevent overriding the parent project's compiler/linker

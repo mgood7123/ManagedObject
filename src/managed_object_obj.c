@@ -159,6 +159,19 @@ static mps_addr_t managed_obj_isfwd(mps_addr_t addr)
   return NULL;
 }
 
+/* managed_obj_isfwd -- object format forwarded test                    %%MPS
+ *
+ * The job of `managed_obj_isfwd` is to detect whether an object has been replaced
+ * by a forwarding object, and return the address of the new copy if it has,
+ * otherwise NULL.  See topic/format.
+ */
+
+static mps_bool_t managed_obj_ispinned(mps_addr_t addr)
+{
+  managed_obj_t obj = (managed_obj_t)addr;
+  return obj->type.pinned;
+}
+
 
 /* managed_obj_fwd -- object format forwarding method                   %%MPS
  *
@@ -183,11 +196,7 @@ static void managed_obj_fwd(mps_addr_t old, mps_addr_t new)
     obj->fwd.fwd = (managed_obj_t)new;
     obj->fwd.size = size;
   }
-  /*
-  if (old != new) {
-    printf("object moved from address %p to address %p\n", old, new);
-  }
-  */
+  printf("object moved from address %p to address %p\n", old, new);
 }
 
 /* managed_obj_pad -- object format padding method                      %%MPS
@@ -210,6 +219,7 @@ static void managed_obj_pad(mps_addr_t addr, size_t size)
     MANAGED_OBJECT_TYPE(obj) = MANAGED_OBJECT_TYPE_PAD;
     obj->pad.size = size;
   }
+  // printf("object padded with address %p\n", addr);
 }
 
 ManagedObjTime managed_obj_convert_to_time(unsigned long stamp) {
@@ -401,6 +411,7 @@ void managed_obj_init(ManagedObjState * state, size_t arena_size) {
     MPS_ARGS_ADD(args, MPS_KEY_FMT_SKIP, managed_obj_skip);
     MPS_ARGS_ADD(args, MPS_KEY_FMT_FWD, managed_obj_fwd);
     MPS_ARGS_ADD(args, MPS_KEY_FMT_ISFWD, managed_obj_isfwd);
+    MPS_ARGS_ADD(args, MPS_KEY_FMT_ISPINNED, managed_obj_ispinned);
     MPS_ARGS_ADD(args, MPS_KEY_FMT_PAD, managed_obj_pad);
     res = mps_fmt_create_k(&state->fmt, state->arena, args);
   } MPS_ARGS_END(args);
@@ -419,7 +430,7 @@ void managed_obj_init(ManagedObjState * state, size_t arena_size) {
   MPS_ARGS_BEGIN(args) {
     // MPS_ARGS_ADD(args, MPS_KEY_CHAIN, state->chain);
     MPS_ARGS_ADD(args, MPS_KEY_FORMAT, state->fmt);
-    res = mps_pool_create_k(&state->pool, state->arena, debug_pool ? mps_class_ams_debug() : mps_class_amc(), args);
+    res = mps_pool_create_k(&state->pool, state->arena, debug_pool ? mps_class_ams_debug() : mps_class_ams(), args);
   } MPS_ARGS_END(args);
   if (res != MPS_RES_OK) managed_obj_error("Couldn't create obj pool");
 
@@ -463,17 +474,19 @@ void managed_obj_init(ManagedObjState * state, size_t arena_size) {
 
     if (res != MPS_RES_OK) printf("Couldn't create root");
 
-  state->pinned_used = 0;
-  state->pinned_capacity = 2;
-  state->pinned = calloc(sizeof(managed_obj_t), state->pinned_capacity);
-  if (state->pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
+  // depreciated - uses extra memory, as opposed setting an object flag
+  //
+  // state->pushed_pinned_used = 0;
+  // state->pushed_pinned_capacity = 2;
+  // state->pushed_pinned = calloc(sizeof(managed_obj_t), state->pushed_pinned_capacity);
+  // if (state->pushed_pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
 
-  res = mps_root_create_area_tagged(
-      &state->pinned_root, state->arena, mps_rank_ambig(),
-      (mps_rm_t)0, state->pinned, state->pinned+state->pinned_capacity,
-      mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
-  );
-  if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
+  // res = mps_root_create_area_tagged(
+  //     &state->pushed_pinned_root, state->arena, mps_rank_ambig(),
+  //     (mps_rm_t)0, state->pushed_pinned, state->pushed_pinned+state->pushed_pinned_capacity,
+  //     mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
+  // );
+  // if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
 
     MANAGED_OBJECT_METADATA_SOURCE_INIT
 }
@@ -521,6 +534,7 @@ void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_siz
     MPS_ARGS_ADD(args, MPS_KEY_FMT_SKIP, managed_obj_skip);
     MPS_ARGS_ADD(args, MPS_KEY_FMT_FWD, managed_obj_fwd);
     MPS_ARGS_ADD(args, MPS_KEY_FMT_ISFWD, managed_obj_isfwd);
+    MPS_ARGS_ADD(args, MPS_KEY_FMT_ISPINNED, managed_obj_ispinned);
     MPS_ARGS_ADD(args, MPS_KEY_FMT_PAD, managed_obj_pad);
     res = mps_fmt_create_k(&state->fmt, state->arena, args);
   } MPS_ARGS_END(args);
@@ -539,7 +553,7 @@ void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_siz
   MPS_ARGS_BEGIN(args) {
     // MPS_ARGS_ADD(args, MPS_KEY_CHAIN, state->chain);
     MPS_ARGS_ADD(args, MPS_KEY_FORMAT, state->fmt);
-    res = mps_pool_create_k(&state->pool, state->arena, debug_pool ? mps_class_ams_debug() : mps_class_amc(), args);
+    res = mps_pool_create_k(&state->pool, state->arena, debug_pool ? mps_class_ams_debug() : mps_class_ams(), args);
   } MPS_ARGS_END(args);
   if (res != MPS_RES_OK) managed_obj_error("Couldn't create obj pool");
 
@@ -550,17 +564,19 @@ void managed_obj_init_with_user_memory(ManagedObjState * state, size_t arena_siz
   res = mps_ap_create_k(&state->ap, state->pool, mps_args_none);
   if (res != MPS_RES_OK) managed_obj_error("Couldn't create obj allocation point");
 
-  state->pinned_used = 0;
-  state->pinned_capacity = 2;
-  state->pinned = calloc(sizeof(managed_obj_t), state->pinned_capacity);
-  if (state->pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
+  // depreciated - uses extra memory, as opposed setting an object flag
+  //
+  // state->pushed_pinned_used = 0;
+  // state->pushed_pinned_capacity = 2;
+  // state->pushed_pinned = calloc(sizeof(managed_obj_t), state->pushed_pinned_capacity);
+  // if (state->pushed_pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
 
-  res = mps_root_create_area_tagged(
-      &state->pinned_root, state->arena, mps_rank_ambig(),
-      (mps_rm_t)0, state->pinned, state->pinned+state->pinned_capacity,
-      mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
-  );
-  if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
+  // res = mps_root_create_area_tagged(
+  //     &state->pushed_pinned_root, state->arena, mps_rank_ambig(),
+  //     (mps_rm_t)0, state->pushed_pinned, state->pushed_pinned+state->pushed_pinned_capacity,
+  //     mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
+  // );
+  // if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
 
   MANAGED_OBJECT_METADATA_SOURCE_INIT
 }
@@ -616,6 +632,7 @@ managed_obj_t managed_obj_make_scanned_with_finalizer(ManagedObjState * state, v
     mps_res_t res = mps_reserve((mps_addr_t*)&obj, state->ap, size);
     if (res != MPS_RES_OK) managed_obj_error("out of memory in make_pointer");
     obj->scanned_pointer.type = MANAGED_OBJECT_TYPE_SCANNED_POINTER;
+    obj->scanned_pointer.pinned = FALSE;
     obj->scanned_pointer.pointer = pointer;
     obj->scanned_pointer.scanner = scanner;
     obj->scanned_pointer.finalization_callback = finalization_callback;
@@ -639,6 +656,7 @@ managed_obj_t managed_obj_make_empty(ManagedObjState * state)
     mps_res_t res = mps_reserve((mps_addr_t*)&obj, state->ap, size);
     if (res != MPS_RES_OK) managed_obj_error("out of memory in make_pointer");
     obj->empty.type = MANAGED_OBJECT_TYPE_EMPTY;
+    obj->empty.pinned = FALSE;
     if (mps_commit(state->ap, obj, size)) {
       break;
     }
@@ -660,85 +678,60 @@ void managed_obj_describe(ManagedObjState * state) {
   printf("DESCRIBED ARENA TRACTS\n");
 }
 
-void managed_obj_pin(ManagedObjState * state, managed_obj_t obj) {
-  int found = 0;
-  for (int i = 0; i < state->pinned_capacity; i++) {
-    if (state->pinned[i] == obj) {
-      found = 1;
-      break;
-    }
-  }
-  // dont pin object that has already been pinned
-  if (found == 1) return;
-  if (state->pinned_used == state->pinned_capacity) {
-    // reallocate
-    int new_capacity = state->pinned_capacity * 2;
-    managed_obj_t * new_pinned = calloc(sizeof(managed_obj_t), new_capacity);
-    if (new_pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
-    // copy old pinned to new pinned
-    memcpy(new_pinned, state->pinned, sizeof(managed_obj_t)*state->pinned_capacity);
-    mps_root_t new_pinned_root = NULL;
-    mps_res_t res = mps_root_create_area_tagged(
-        &new_pinned_root, state->arena, mps_rank_ambig(),
-        (mps_rm_t)0, new_pinned, new_pinned+new_capacity,
-        mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
-    );
-    if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
-    // both are pinned, we can safely destroy old pin
-    mps_root_destroy(state->pinned_root);
-    state->pinned_root = new_pinned_root;
-    free(state->pinned);
-    state->pinned = new_pinned;
-    state->pinned_capacity = new_capacity;
-  }
-  for (int i = 0; i < state->pinned_capacity; i++) {
-    if (state->pinned[i] == NULL) {
-      state->pinned[i] = obj;
-      state->pinned_used++;
-      break;
-    }
-  }
+inline void managed_obj_pin(ManagedObjState * state, managed_obj_t obj) {
+  obj->type.pinned = TRUE;
+  state->pinned_used++;
 }
 
-void managed_obj_unpin(ManagedObjState * state, managed_obj_t obj) {
-  int found = 0;
-  int index = 0;
-  for (int i = 0; i < state->pinned_capacity; i++) {
-    if (state->pinned[i] == obj) {
-      found = 1;
-      index = i;
-      break;
-    }
-  }
-  // dont unpin object that has not been pinned
-  if (found == 0) return;
-  state->pinned[index] = NULL;
+inline void managed_obj_unpin(ManagedObjState * state, managed_obj_t obj) {
+  obj->type.pinned = FALSE;
   state->pinned_used--;
-  memmove(state->pinned+index, state->pinned+index+1, sizeof(managed_obj_t)*(state->pinned_capacity-(index+1)));
-  state->pinned[state->pinned_capacity-1] = NULL;
-  // always keep at least 2 elements
-  if (state->pinned_capacity > 2 && state->pinned_used == state->pinned_capacity / 2) {
-    // reallocate
-    int new_capacity = state->pinned_capacity / 2;
-    managed_obj_t * new_pinned = malloc(sizeof(managed_obj_t)*new_capacity);
-    if (new_pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
-    // copy old pinned to new pinned
-    memcpy(new_pinned, state->pinned, sizeof(managed_obj_t)*new_capacity);
-    mps_root_t new_pinned_root = NULL;
-    mps_res_t res = mps_root_create_area_tagged(
-        &new_pinned_root, state->arena, mps_rank_ambig(),
-        (mps_rm_t)0, new_pinned, new_pinned+new_capacity,
-        mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
-    );
-    if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
-    // both are pinned, we can safely destroy old pin
-    mps_root_destroy(state->pinned_root);
-    state->pinned_root = new_pinned_root;
-    free(state->pinned);
-    state->pinned = new_pinned;
-    state->pinned_capacity = new_capacity;
-  }
 }
+
+// depreciated - uses extra memory, as opposed setting an object flag
+//
+// void reroot(ManagedObjState * state, managed_obj_t * new_pinned, int new_capacity) {
+//     mps_root_t new_pinned_root = NULL;
+//     mps_res_t res = mps_root_create_area_tagged(
+//         &new_pinned_root, state->arena, mps_rank_ambig(),
+//         (mps_rm_t)0, new_pinned, new_pinned+new_capacity,
+//         mps_scan_area_tagged, sizeof(mps_word_t) - 1, (mps_word_t)0
+//     );
+//     if (res != MPS_RES_OK) managed_obj_error("Couldn't create pinned root");
+//     // both are pinned, we can safely destroy old pin
+//     mps_root_destroy(state->pushed_pinned_root);
+//     state->pushed_pinned_root = new_pinned_root;
+//     free(state->pushed_pinned);
+//     state->pushed_pinned = new_pinned;
+//     state->pushed_pinned_capacity = new_capacity;
+// }
+
+// void managed_obj_push_pin(ManagedObjState * state, managed_obj_t obj) {
+//   if (state->pushed_pinned_used == state->pushed_pinned_capacity) {
+//     // reallocate
+//     int new_capacity = state->pushed_pinned_capacity * 2;
+//     managed_obj_t * new_pinned = calloc(sizeof(managed_obj_t), new_capacity);
+//     if (new_pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
+//     // copy old pinned to new pinned
+//     memcpy(new_pinned, state->pushed_pinned, sizeof(managed_obj_t)*state->pushed_pinned_capacity);
+//     reroot(state, new_pinned, new_capacity);
+//   }
+//   state->pushed_pinned[state->pushed_pinned_used++] = obj;
+// }
+
+// void managed_obj_pop_pin(ManagedObjState * state) {
+//   state->pushed_pinned[--state->pushed_pinned_used] = NULL;
+//   // always keep at least 2 elements
+//   if (state->pushed_pinned_capacity > 2 && state->pushed_pinned_used == state->pushed_pinned_capacity / 2) {
+//     // reallocate
+//     int new_capacity = state->pushed_pinned_capacity / 2;
+//     managed_obj_t * new_pinned = malloc(sizeof(managed_obj_t)*new_capacity);
+//     if (new_pinned == NULL) managed_obj_error("Couldn't allocate pinned memory");
+//     // copy old pinned to new pinned
+//     memcpy(new_pinned, state->pushed_pinned, sizeof(managed_obj_t)*new_capacity);
+//     reroot(state, new_pinned, new_capacity);
+//   }
+// }
 
 void managed_obj_collect(ManagedObjState * state) {
     printf("\nCollection start\n");
@@ -846,6 +839,8 @@ void destroy_roots(mps_arena_t mps_arena) {
 void managed_obj_deinit(ManagedObjState * state) {
     mps_arena_park(state->arena);        /* ensure no collection is running */
 
+    managed_obj_print_stats(state);
+
     printf("deinit - destroy all roots\n");
 
     destroy_roots(state->arena);
@@ -859,13 +854,6 @@ void managed_obj_deinit(ManagedObjState * state) {
     printf("deinit - collected\n");
 
     managed_obj_print_stats(state);
-
-    memset(state->pinned, 0, sizeof(managed_obj_t)*(state->pinned_capacity));
-    free(state->pinned);
-    state->pinned = NULL;
-    state->pinned_capacity = 0;
-    state->pinned_used = 0;
-
 
     printf("deinit - shutdown\n");
 
@@ -884,10 +872,16 @@ void managed_obj_print_stats(ManagedObjState * state) {
     
     printf("Stats:\n");
     printf("  Pinned:\n");
-    printf("    capacity:         %zu\n", state->pinned_capacity);
-    printf("    used:             %zu\n", state->pinned_used);
-    printf("    capacity (bytes): %zu\n", sizeof(managed_obj_t)*(state->pinned_capacity));
-    printf("    used (bytes):     %zu\n", sizeof(managed_obj_t)*(state->pinned_used));
+    printf("    pinned objects:   %zu\n", state->pinned_used);
+
+    // depreciated - uses extra memory, as opposed setting an object flag
+    //
+    // printf("  Pinned (pushed):\n");
+    // printf("    used:             %zu\n", state->pushed_pinned_used);
+    // printf("    used (bytes):     %zu\n", sizeof(managed_obj_t)*(state->pushed_pinned_used));
+    // printf("    capacity:         %zu\n", state->pushed_pinned_capacity);
+    // printf("    capacity (bytes): %zu\n", sizeof(managed_obj_t)*(state->pushed_pinned_capacity));
+
     printf("  Memory:\n");
     printf("    Objects (managed_obj_malloc):\n");
     printf("      allocated (bytes): %zu\n", state->allocated_bytes);

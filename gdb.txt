@@ -1,0 +1,16 @@
+Starting program: /home/DATA/git/Gecko/HTML/qparse/ManagedObject/release_EXECUTABLE/managed_object_tests_debug 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+This is a bug, please report it.  For instructions, see:
+<https://www.gnu.org/software/gdb/bugs/>.
+
+Command aborted.
+Starting program: /home/DATA/git/Gecko/HTML/qparse/ManagedObject/release_EXECUTABLE/managed_object_tests_debug 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+This is a bug, please report it.  For instructions, see:
+<https://www.gnu.org/software/gdb/bugs/>.
+
+Command aborted.
